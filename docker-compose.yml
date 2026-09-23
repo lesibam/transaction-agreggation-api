@@ -50,6 +50,10 @@ services:
 
   transaction-api:
     build: .
+    # Explicit tag: CI prebuilds this image with buildx (GHA layer cache) and
+    # runs `docker compose up` WITHOUT --build, so the stack reuses it instead
+    # of rebuilding. Local usage is unchanged (compose builds + retags).
+    image: evilcorp/transact:local
     ports:
       - "8080:8080"
     environment:

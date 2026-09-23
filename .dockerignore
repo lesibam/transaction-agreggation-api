@@ -1,0 +1,24 @@
+# Keep the Docker build context minimal and secret-free.
+# The Dockerfile only needs pom.xml and src/ — everything else is excluded,
+# which keeps .env out of image build contexts and speeds up CI uploads.
+
+.git
+.gitignore
+.github
+.idea
+.vscode
+.env
+docs
+helm
+prometheus
+grafana
+tests
+scripts
+node_modules
+playwright-report
+test-results
+playwright-results.json
+target
+*.md
+docker-compose.yml
+docker-compose.e2e.yml

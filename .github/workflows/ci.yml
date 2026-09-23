@@ -43,13 +43,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # BLOCKING security gate: fixable CRITICAL/HIGH findings fail the build
+      # (ignore-unfixed filters vulnerabilities with no available fix).
+      # Accepted exceptions live in .trivyignore and MUST carry a justification
+      # and an expiry date; they are re-reviewed at expiry.
       - name: Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true # non-blocking for now; tighten once baseline is clean
         with:
           image-ref: evilcorp/transact:${{ github.sha }}
           format: table
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
@@ -70,10 +73,79 @@ jobs:
           tags: evilcorp/transact:${{ github.sha }},evilcorp/transact:latest
           cache-from: type=gha
 
+  # Full composed-runtime verification: builds the API image (reusing the GHA
+  # layer cache), boots postgres+zookeeper+kafka+api via docker compose, asserts
+  # the auth/error contract over real HTTP, then runs the Playwright suite with
+  # a ZERO-SKIPPED assertion — a skipped E2E run is NOT RUN and must never read
+  # as green (see docs/principal_engineer_review_report.md, C-01).
+  e2e-smoke:
+    name: E2E smoke (compose + Playwright, zero-skipped)
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    env:
+      # Ephemeral CI-only values — the compose file refuses to start without them.
+      POSTGRES_PASSWORD: ci-only-postgres-password
+      SPRING_DATASOURCE_PASSWORD: ci-only-postgres-password
+      APP_SECURITY_JWT_SECRET: ci-only-jwt-secret-0123456789abcdef-0123456789abcdef
+      E2E_BASE_URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image (local tag, reuses containerize's GHA cache)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: evilcorp/transact:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Start stack and wait for health (image prebuilt — no rebuild)
+        run: docker compose up -d --wait --wait-timeout 300 postgres zookeeper kafka transaction-api
+
+      - name: Smoke contract checks (health, authed 200, 401 problem+json)
+        run: |
+          set -euo pipefail
+          curl -fsS "$E2E_BASE_URL/actuator/health" | grep -q '"status":"UP"'
+          TOKEN=$(node scripts/mint-jwt.mjs)
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+            "$E2E_BASE_URL/v1/customers/00000000-0000-0000-0000-000000000001/transactions?limit=1")
+          [ "$STATUS" = "200" ] || { echo "::error::authenticated smoke request returned $STATUS"; exit 1; }
+          BODY=$(curl -s -H "Authorization: Bearer not.a.jwt" \
+            "$E2E_BASE_URL/v1/customers/00000000-0000-0000-0000-000000000001/transactions?limit=1")
+          echo "$BODY" | grep -q '"title":"Unauthenticated"' \
+            || { echo "::error::401 body deviates from the RFC 7807 contract: $BODY"; exit 1; }
+
+      - name: Playwright E2E (JSON report + zero-skipped assertion)
+        run: |
+          set -euo pipefail
+          set +e
+          npx playwright test --reporter=json > playwright-results.json
+          set -e
+          node scripts/e2e-assert.mjs playwright-results.json
+
+      - name: Teardown stack
+        if: always()
+        run: docker compose down -v --remove-orphans
+
   # Requires the KUBECONFIG secret in the `demo` environment.
   # Steps are skipped when the secret is absent so the job does not fail on forks/setups without a cluster.
   deploy-demo:
-    needs: containerize
+    needs: [containerize, e2e-smoke]
     runs-on: ubuntu-latest
     environment: demo
     env:

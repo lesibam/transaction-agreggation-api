@@ -134,7 +134,7 @@ Every task in this plan must adhere to these "Staff Engineer" constraints:
 
 - [x] **Containerization**: Build a multi-stage, non-root Dockerfile for the application.
 - [x] **Orchestration**: Create Helm charts for Kubernetes deployment.
-- [ ] **CI Pipeline**: Automate: `Compile → Test → Scan → Publish → Deploy`. *(Partial: `.github/workflows/ci.yml` builds, runs unit/integration tests, scans with Trivy — but non-blocking (`continue-on-error`) — pushes the image, and runs `helm upgrade` only when the `KUBECONFIG` secret is configured. Scan is not enforced and publish/deploy are conditional, so the item stays open.)*
+- [ ] **CI Pipeline**: Automate: `Compile → Test → Scan → Publish → Deploy`. *(Wired end-to-end in `.github/workflows/ci.yml`: build+Testcontainers suite → containerize with a **blocking** Trivy gate (CRITICAL/HIGH, `ignore-unfixed`; dated exceptions in `.trivyignore`) → `e2e-smoke` job that boots the compose stack, asserts the health/auth/RFC-7807 contract over real HTTP, and runs Playwright with a **zero-skipped assertion** (`scripts/e2e-assert.mjs` — a skipped E2E run is NOT RUN, never green) → conditional publish/deploy (Docker Hub and KUBECONFIG secrets gate those steps by design, so forks don't fail). Stays open until the pipeline has executed green on a remote — no git remote is configured yet.)*
 - [ ] **Recovery Plan**: Document and test the database restore process (RPO/RTO verification). *(Plan documented in `docs/recovery-plan.md` as UNTESTED targets — no restore drill executed, so this stays open.)*
 
 ---

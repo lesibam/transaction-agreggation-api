@@ -1,0 +1,14 @@
+# Trivy ignore list — accepted vulnerabilities ONLY.
+#
+# Policy (enforced by review, see docs/principal_engineer_review_report.md H-02):
+#   1. One vulnerability ID (CVE/GHSA) per line.
+#   2. Every entry MUST be justified in a trailing comment with:
+#        - why it is accepted (no reachable path / mitigated / wontfix reason)
+#        - an EXPIRY DATE after which the exception must be re-reviewed or fixed
+#   3. Entries without justification + expiry will be rejected in review.
+#   4. Re-run the scan at expiry: `trivy image --ignore-unfixed --severity CRITICAL,HIGH <image>`
+#
+# CI behavior: the scan FAILS the build on any fixable CRITICAL/HIGH finding
+# that is not listed here (exit-code: 1 in .github/workflows/ci.yml).
+#
+# There are currently NO accepted exceptions — keep it that way if possible.
