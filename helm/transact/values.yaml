@@ -1,0 +1,58 @@
+replicaCount: 1
+# demo-safe default: ShedLock would allow 2+ replicas, but keep 1 for demo stability
+
+image:
+  repository: evilcorp/transact
+  pullPolicy: IfNotPresent
+  tag: "" # defaults to Chart.appVersion when empty
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Rendered into a Kubernetes Secret (templates/secret.yaml) - never commit real values.
+# Override at deploy time: helm upgrade --set secret.springDatasourcePassword=... etc.
+secret:
+  springDatasourcePassword: "change-me-dev-only"
+  appSecurityJwtSecret: "change-me-dev-only-jwt-secret-0123456789"
+
+env:
+  spring_datasource_url: "jdbc:postgresql://postgres-service:5432/transact"
+  spring_datasource_username: "app"
+  spring_kafka_bootstrap_servers: "kafka-service:9092"
+  app_ingestion_interval_ms: "60000"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10

@@ -1,0 +1,519 @@
+openapi: 3.1.0
+info:
+  title: Transact — Transaction Aggregation API
+  version: 1.0.0
+  description: |
+    Canonical, multi-source transaction aggregation API.
+
+    - Keyset pagination on `(transaction_date DESC, id DESC)`; cursors are opaque.
+    - Responses carry `completeness` (COMPLETE/PARTIAL) and `freshness` metadata derived from `source_sync_state`.
+    - Aggregates are computed per currency in SQL — no implicit FX conversion.
+    - Customer isolation: the JWT `sub` claim must equal the path `customerId` unless the caller holds the `ADMIN` role.
+    - Errors follow RFC 7807 (`application/problem+json`) with a `traceId` extension copied from the MDC `correlationId`.
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8080
+    description: Local Docker Compose
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/customers/{customerId}/transactions:
+    get:
+      operationId: getCustomerTransactions
+      summary: List canonical transactions for a customer
+      description: |
+        Keyset-paginated list of canonical transactions.
+        Sort key is `transaction_date DESC, id DESC`. Pass `meta.nextCursor` back as `cursor` to fetch the next page.
+        Response metadata reports per-source freshness and overall completeness (COMPLETE/PARTIAL).
+      tags: [Transactions]
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: Customer UUID. Must match the JWT `sub` claim unless the caller is ADMIN.
+          schema:
+            type: string
+            format: uuid
+            example: 00000000-0000-0000-0000-000000000001
+        - name: cursor
+          in: query
+          required: false
+          description: |
+            Opaque keyset cursor returned as `meta.nextCursor` by a previous call.
+            Encodes the last-seen sort key (`transaction_date`, `id`); the next page resumes strictly after it.
+            Omit for the first page. Invalid cursors yield 400.
+          schema:
+            type: string
+          example: eyJ0IjoiMjAyNi0wOS0yMlQxMDowMDowMFoiLCJpZCI6Ij...
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of transactions to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: category
+          in: query
+          required: false
+          description: Filter by canonical category code.
+          schema:
+            type: string
+          example: GROCERIES
+        - name: direction
+          in: query
+          required: false
+          description: Filter by transaction direction.
+          schema:
+            type: string
+            enum: [DEBIT, CREDIT]
+        - name: startDate
+          in: query
+          required: false
+          description: Inclusive lower bound on transaction date (ISO-8601).
+          schema:
+            type: string
+            format: date-time
+          example: "2026-09-01T00:00:00Z"
+        - name: endDate
+          in: query
+          required: false
+          description: Inclusive upper bound on transaction date (ISO-8601).
+          schema:
+            type: string
+            format: date-time
+          example: "2026-10-01T00:00:00Z"
+        - name: minAmount
+          in: query
+          required: false
+          description: Inclusive lower bound on the absolute amount (sign is carried by `direction`).
+          schema:
+            type: number
+          example: 100
+        - name: maxAmount
+          in: query
+          required: false
+          description: Inclusive upper bound on the absolute amount.
+          schema:
+            type: number
+          example: 5000
+      responses:
+        "200":
+          description: Page of transactions with freshness/completeness metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/customers/{customerId}/summary:
+    get:
+      operationId: getCustomerSummary
+      summary: Aggregated monetary totals per currency
+      description: |
+        SQL-side aggregates (SUM) grouped by currency and by category for the optional date range.
+        Totals are never combined across currencies; no implicit FX conversion.
+        Metadata reports completeness and per-source availability.
+      tags: [Transactions]
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: Customer UUID. Must match the JWT `sub` claim unless the caller is ADMIN.
+          schema:
+            type: string
+            format: uuid
+            example: 00000000-0000-0000-0000-000000000001
+        - name: startDate
+          in: query
+          required: false
+          description: Inclusive lower bound on transaction date (ISO-8601).
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          required: false
+          description: Inclusive upper bound on transaction date (ISO-8601).
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Per-currency summaries and category breakdown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/admin/sources:
+    get:
+      operationId: listSourceSyncStatus
+      summary: Per-source ingestion sync status (ADMIN)
+      description: |
+        Operational view of `source_sync_state`: last successful sync, status (SUCCESS/FAILED),
+        consecutive failure count, and the last sanitized error. Requires the ADMIN role.
+      tags: [Admin]
+      responses:
+        "200":
+          description: Sync status for every configured source.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceStatusListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT bearer token. The `sub` claim is the customer UUID; the `roles` claim
+        carries `CUSTOMER` and/or `ADMIN`. Tokens are signed with the server-side
+        secret supplied via the `app.security.jwt-secret` environment variable.
+
+  parameters:
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      description: Customer UUID. Must match the JWT `sub` claim unless the caller is ADMIN.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Invalid request (bad cursor, malformed parameter, validation failure).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: https://api.transact.evilcorp.za/errors/invalid-request
+            title: Bad Request
+            status: 400
+            detail: The provided cursor is malformed or expired.
+            instance: /v1/customers/00000000-0000-0000-0000-000000000001/transactions
+            traceId: 3f6c1b2a-8d4e-4f0a-9b7c-1d2e3f4a5b6c
+    Unauthorized:
+      description: Missing, malformed, or invalid JWT (security filter entry point).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: https://api.transact.evilcorp.za/errors/unauthenticated
+            title: Unauthenticated
+            status: 401
+            detail: Authentication is required to access this resource
+            instance: /v1/customers/00000000-0000-0000-0000-000000000001/transactions
+            traceId: 8a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9
+    Forbidden:
+      description: |
+        Authenticated but not permitted. Two paths produce 403:
+        - in-controller tenant isolation (`CustomerAccessValidator`): JWT `sub` does not match
+          the path `customerId` and the caller is not ADMIN — type `.../forbidden`,
+          title `Forbidden`;
+        - URL-level role check (e.g. non-admin on `/v1/admin/**`) — type `.../access-denied`,
+          title `Access Denied`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: https://api.transact.evilcorp.za/errors/forbidden
+            title: Forbidden
+            status: 403
+            detail: "Access denied: customer does not match authenticated principal"
+            instance: /v1/customers/660f9500-f30c-52e5-b827-557766554411/transactions
+            traceId: c9d8e7f6-5a4b-3c2d-1e0f-9a8b7c6d5e4f
+    InternalServerError:
+      description: Unexpected server error. Detail is sanitized — never a stack trace or raw exception message.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: https://api.transact.evilcorp.za/errors/internal
+            title: Internal Server Error
+            status: 500
+            detail: An unexpected error occurred. Contact support with the traceId.
+            instance: /v1/customers/00000000-0000-0000-0000-000000000001/transactions
+            traceId: e1f2a3b4-c5d6-4789-8a0b-1c2d3e4f5a6b
+
+  schemas:
+    ProblemDetail:
+      type: object
+      description: RFC 7807 problem detail with a traceId extension (MDC correlationId).
+      required: [type, title, status, detail, instance, traceId]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary of the problem type.
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP status code.
+        detail:
+          type: string
+          description: Sanitized explanation specific to this occurrence.
+        instance:
+          type: string
+          description: URI reference identifying the specific occurrence (typically the request path).
+        traceId:
+          type: string
+          description: Correlation ID copied from the MDC `correlationId` (from the X-Correlation-ID header).
+
+    Money:
+      type: object
+      required: [value, currency]
+      properties:
+        value:
+          type: number
+          description: Absolute monetary value; sign is carried by `direction`.
+          example: 120.50
+        currency:
+          type: string
+          description: ISO-4217 currency code.
+          minLength: 3
+          maxLength: 3
+          example: ZAR
+
+    Transaction:
+      type: object
+      required: [id, amount, direction, transactionDate, source]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal canonical transaction UUID.
+        amount:
+          $ref: "#/components/schemas/Money"
+        direction:
+          type: string
+          enum: [DEBIT, CREDIT]
+        transactionDate:
+          type: string
+          format: date-time
+          description: When the transaction occurred (part of the keyset sort key).
+        description:
+          type: [string, "null"]
+        merchant:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: [string, "null"]
+              description: Normalized merchant name when available.
+              example: Woolworths
+        category:
+          type: object
+          required: [code]
+          properties:
+            code:
+              type: [string, "null"]
+              description: Canonical category code assigned by the rule engine (e.g. GROCERIES, UNCATEGORIZED).
+              example: GROCERIES
+        source:
+          type: object
+          required: [provider, transactionId]
+          properties:
+            provider:
+              type: string
+              description: Source system identifier (source_id).
+              enum: [SOURCE_A, SOURCE_B, SOURCE_C]
+            transactionId:
+              type: string
+              description: Source-scoped transaction ID; unique only within that source.
+              example: ext_123
+
+    FreshnessSource:
+      type: object
+      required: [source, lastSync, status]
+      properties:
+        source:
+          type: string
+          example: SOURCE_A
+        lastSync:
+          type: [string, "null"]
+          format: date-time
+          description: Last successful sync for this source; null if never synced.
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, UNKNOWN]
+          description: |
+            AVAILABLE when the source's last sync cycle succeeded within the freshness thresholds;
+            UNAVAILABLE when the source is failing or exceeded them; UNKNOWN when never synced.
+
+    Freshness:
+      type: object
+      required: [status, generatedAt, sources]
+      properties:
+        status:
+          type: string
+          enum: [FRESH, STALE, VERY_STALE, UNKNOWN]
+          description: |
+            Worst per-source status. FRESH <= 5 min since last sync (default threshold),
+            STALE <= 30 min, VERY_STALE beyond 30 min, UNKNOWN if never synced.
+            Thresholds are configurable.
+        generatedAt:
+          type: string
+          format: date-time
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreshnessSource"
+
+    ListMeta:
+      type: object
+      required: [nextCursor, hasMore, completeness, freshness]
+      properties:
+        nextCursor:
+          type: [string, "null"]
+          description: Opaque keyset cursor for the next page (null when hasMore is false).
+        hasMore:
+          type: boolean
+        completeness:
+          type: string
+          enum: [COMPLETE, PARTIAL]
+          description: |
+            COMPLETE when every configured source's last sync cycle is SUCCESS;
+            PARTIAL otherwise (derived from source_sync_state — partial results are labelled, never hidden).
+        freshness:
+          $ref: "#/components/schemas/Freshness"
+
+    TransactionListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        meta:
+          $ref: "#/components/schemas/ListMeta"
+
+    CurrencySummary:
+      type: object
+      required: [currency, totalDebit, totalCredit, netFlow]
+      properties:
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: ZAR
+        totalDebit:
+          type: number
+          example: 5000.00
+        totalCredit:
+          type: number
+          example: 12000.00
+        netFlow:
+          type: number
+          description: totalCredit - totalDebit for this currency only.
+          example: 7000.00
+
+    CategorySummary:
+      type: object
+      required: [category, amount, currency]
+      properties:
+        category:
+          type: string
+          example: FOOD_AND_DINING
+        amount:
+          type: number
+          example: 1200.00
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: ZAR
+
+    SummaryResponse:
+      type: object
+      required: [summaries, categoryBreakdown, meta]
+      properties:
+        summaries:
+          type: array
+          description: One entry per currency — totals are never combined across currencies.
+          items:
+            $ref: "#/components/schemas/CurrencySummary"
+        categoryBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategorySummary"
+        meta:
+          $ref: "#/components/schemas/ListMeta"
+
+    SourceStatus:
+      type: object
+      required: [id, name, status, lastSuccessfulSync, lastAttempt, failureCount, freshnessSeconds, freshnessStatus]
+      properties:
+        id:
+          type: string
+          example: SOURCE_A
+        name:
+          type: [string, "null"]
+          description: Display name from source_sync_state when set.
+          example: Source A
+        status:
+          type: string
+          enum: [SUCCESS, FAILED, INITIAL]
+          description: Last recorded sync cycle outcome from source_sync_state.
+        lastSuccessfulSync:
+          type: [string, "null"]
+          format: date-time
+        lastAttempt:
+          type: [string, "null"]
+          format: date-time
+        failureCount:
+          type: integer
+          minimum: 0
+          description: Failures since the last success.
+        freshnessSeconds:
+          type: [integer, "null"]
+          description: Seconds since last successful sync; null when never synced.
+        freshnessStatus:
+          type: string
+          enum: [FRESH, STALE, VERY_STALE, UNKNOWN]
+          description: Derived freshness bucket from app.freshness thresholds.
+
+    SourceStatusListResponse:
+      type: object
+      required: [sources]
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceStatus"

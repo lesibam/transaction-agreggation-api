@@ -1,0 +1,25 @@
+# Secrets — never commit (see .env.example for the template)
+.env
+*.pem
+*.key
+
+# Build artifacts
+target/
+*.class
+
+# Node / Playwright
+node_modules/
+playwright-report/
+test-results/
+playwright-results.json
+playwright.log
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Logs
+*.log
+logs/

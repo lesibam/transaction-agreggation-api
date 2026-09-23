@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "transact.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: transact
+  template:
+    metadata:
+      labels:
+        app: transact
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: transact
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: {{ .Values.env.spring_datasource_url | quote }}
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ .Values.env.spring_datasource_username | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "transact.fullname" . }}-secret
+                  key: SPRING_DATASOURCE_PASSWORD
+            - name: APP_SECURITY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "transact.fullname" . }}-secret
+                  key: APP_SECURITY_JWT_SECRET
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: {{ .Values.env.spring_kafka_bootstrap_servers | quote }}
+            - name: APP_INGESTION_INTERVAL_MS
+              value: {{ .Values.env.app_ingestion_interval_ms | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}

@@ -1,0 +1,56 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/transact}
+    username: ${SPRING_DATASOURCE_USERNAME:app}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+        spring.json.value.default.type: za.co.evilcorp.transact.application.port.TransactionIngestedEvent
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+  mvc:
+    problemdetails:
+      enabled: true
+
+app:
+  security:
+    jwt-secret: ${APP_SECURITY_JWT_SECRET}
+    jwt-issuer: transact
+    jwt-audience: transact-api
+  ingestion:
+    interval-ms: ${APP_INGESTION_INTERVAL_MS:60000}
+    retry-max-attempts: 3
+    retry-backoff-ms: 500
+  freshness:
+    fresh-seconds: 300
+    stale-seconds: 1800
+  sources:
+    ids: SOURCE_A,SOURCE_B,SOURCE_C
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

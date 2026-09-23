@@ -1,0 +1,24 @@
+# E2E-only compose override: alternate host ports so we do not clash with
+# other local projects. `!override` replaces the base-file ports list.
+#
+# PRE-FLIGHT (run before starting; fail fast instead of hitting an impostor):
+#   lsof -nP -iTCP:18081 -sTCP:LISTEN   # must print nothing
+#   lsof -nP -iTCP:9093 -sTCP:LISTEN    # must print nothing
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build \
+#     postgres zookeeper kafka transaction-api
+#   E2E_BASE_URL=http://127.0.0.1:18081 npx playwright test
+
+services:
+  kafka:
+    ports: !override
+      # Host 9093 -> container EXTERNAL listener. NOTE: the broker still
+      # advertises localhost:9092 (see docker-compose.yml), so host-side Kafka
+      # *tools* would need an advertised-listener override. The app is
+      # unaffected: it uses the INTERNAL listener kafka:29092.
+      - "9093:9092"
+
+  transaction-api:
+    ports: !override
+      - "18081:8080"
