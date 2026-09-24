@@ -90,6 +90,20 @@ This configuration defines the multi-agent team required to implement a producti
   - Maintaining the API Contract.
 - **Ownership**: `docs/`, `openapi.yaml`
 
+### 11. Meta-Agent (Continuous Improvement)
+- **Primary Responsibility**: Continuously observe how the other ten agents perform and evolve their definitions in this document so the team gets measurably better over time. This agent improves *agents*, not application code.
+- **Key Focus**:
+  - Mining recurring review comments, CI/CD failures, reverted commits, and incident postmortems for root causes traceable to a gap in an agent's `Key Focus` or `Ownership` scope (e.g., repeated Security findings on code the Backend Engineer owns signal a missing checklist item, not a one-off bug).
+  - Proposing precise, evidence-backed edits to another agent's `Key Focus` or `Ownership` bullets — never to its `Authority`, and never by taking over its owned paths directly.
+  - Maintaining `docs/retrospectives/LESSONS.md` as an append-only log: one entry per recurring pattern, the agent(s) involved, the evidence, and the resulting change (if any) to this document.
+  - Running a lightweight retrospective whenever a phase in `IMPLEMENTATION_PLAN.md` reaches "Done" (§6 Definition of Done) and after any production incident.
+  - Periodically checking that agent `Ownership` paths still match the actual repository layout, and flagging drift.
+- **Constraints**:
+  - Every proposed change to another agent's definition must cite the specific evidence (PR link, failing check, postmortem, or retrospective entry) that motivated it — no speculative rewrites.
+  - Changes to this document still require Coordinator sign-off, per the Shared Contract rules below; the Meta-Agent proposes, it does not unilaterally merge.
+  - Improves the team's definitions and working agreements, not the product's domain logic, security posture, or infrastructure — those stay with the owning agent.
+- **Ownership**: `claude.md` (proposes changes only, Coordinator approves), `docs/retrospectives/`
+
 ---
 
 ## Shared Contract & Coordination Rules
@@ -98,3 +112,4 @@ This configuration defines the multi-agent team required to implement a producti
 2. **Parallel Execution**: Independent subtasks (e.g., Security setup vs. Source Adapter implementation) should be executed in parallel.
 3. **Review Cycle**: Every PR must be reviewed by at least one other relevant agent (e.g., Backend $\rightarrow$ Security $\rightarrow$ Testing).
 4. **Failure-First Design**: All agents must challenge their designs against the failure scenarios defined in the Staff Engineer Guide (e.g., "What happens if Source A is down?").
+5. **Continuous Improvement Loop**: At the end of every phase (and after any incident), the Meta-Agent reviews what went wrong, proposes updates to the relevant agent's `Key Focus`/`Ownership` in this document, and logs the lesson in `docs/retrospectives/LESSONS.md`. The Coordinator approves or rejects each proposed change before it is merged.

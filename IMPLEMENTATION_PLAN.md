@@ -45,6 +45,9 @@ Every task in this plan must adhere to these "Staff Engineer" constraints:
 | **6: SRE** | SRE | Architect, Integration | `Dockerfile`, `docker-compose.yml` |
 | **7: QA** | Testing | All | `src/test/`, `tests/e2e/` |
 | **8: Deploy** | SRE | Architect | `helm/`, `.github/workflows/` |
+| **Ongoing: Retrospective** | Meta-Agent | Coordinator | `claude.md` (proposals only), `docs/retrospectives/` |
+
+The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done" (§6) and after any incident, feeding evidence-backed proposals back into this document and `claude.md` rather than owning implementation code.
 
 ---
 
@@ -157,3 +160,4 @@ A phase is considered "Done" when:
 3. Integration tests pass in a Testcontainers environment.
 4. OpenAPI spec is updated and reflects the actual implementation.
 5. The Coordinator has signed off on the architectural consistency.
+6. The Meta-Agent has run a retrospective, logged any recurring findings in `docs/retrospectives/LESSONS.md`, and proposed any resulting updates to `claude.md`.
