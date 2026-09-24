@@ -87,7 +87,31 @@ graph LR
 
 ## Running Locally
 
-**Prerequisites:** JDK 21, Maven 3.9+, Docker & Docker Compose.
+**Prerequisites:** JDK 21, Maven 3.9+, Docker & Docker Compose, Node.js.
+
+### Quick start: `dev.sh`
+
+The fastest path to a running, demonstrable stack is the `dev.sh` script at the repo root — it wraps everything below (compose, secrets, JWT minting, tests, load tests) behind a handful of commands:
+
+```bash
+./dev.sh setup    # checks prerequisites, generates .env with dev-only secrets, builds the image
+./dev.sh start    # postgres, kafka, the API, prometheus, grafana — waits for health
+./dev.sh seed     # waits for the first ingestion cycle, then runs an example authenticated query
+./dev.sh status   # container states + API health + per-source sync status
+./dev.sh logs -f  # tail all services (or ./dev.sh logs transaction-api -f for one)
+./dev.sh test         # full suite (unit + Testcontainers integration)
+./dev.sh test --unit  # just the subset that doesn't need Docker, for fast iteration
+./dev.sh test --e2e   # Playwright against the running stack, same zero-skipped gate CI uses
+./dev.sh perf     # k6 load test (scripts/load-test.js) — uses a local k6 binary or falls back
+                  # to the official grafana/k6 Docker image automatically
+./dev.sh stop     # stop the stack (add --volumes to also wipe the Postgres data volume)
+./dev.sh certs && ./dev.sh start --tls   # optional: local HTTPS on :8443 (self-signed, API listener only)
+./dev.sh help     # full command reference
+```
+
+`./dev.sh setup && ./dev.sh start && ./dev.sh seed` is the whole demo bring-up. The manual, step-by-step equivalent (useful if you want to understand or customize what the script does) follows below.
+
+### Manual steps
 
 1. **Create `.env`** from the template at the repo root (never commit it):
 
@@ -292,13 +316,20 @@ Partial results are always labelled: consumers can distinguish `COMPLETE` from `
 | Unit / service | JUnit 5 | `src/test/java` (e.g. `IngestionServiceTest`) |
 | Repository / integration | Testcontainers (PostgreSQL 16, Kafka) | `TransactionRepositoryTest` (duplicate + cross-source ID cases), `ResilienceTest` |
 | End-to-end | Playwright | `tests/e2e/transaction_flow.spec.ts` — list/summary shape, freshness metadata, tenant isolation (403), unauthenticated (401) |
+| Load | k6 | `scripts/load-test.js` — checks the p99 < 200ms / error-rate < 0.1% targets from `IMPLEMENTATION_PLAN.md` Phase 6 |
 
 ```bash
-./mvnw test                 # unit + Testcontainers integration
-npx playwright test         # E2E against a running instance
+./dev.sh test                 # unit + Testcontainers integration (equivalent to `mvn test`)
+./dev.sh test --unit          # only the subset that doesn't need Docker/Testcontainers
+./dev.sh test --e2e           # Playwright against a running stack, zero-skipped gate enforced
+./dev.sh perf                 # k6 load test against a running stack
+
+# Without dev.sh:
+./scripts/test.sh test        # mvn test (there is no Maven wrapper in this repo — use this or `mvn`)
+npx playwright test           # E2E against a running instance
 ```
 
-> The Playwright specs need a running stack (`docker compose up -d` + the app on `:8080`). `tests/e2e/global-setup.ts` mints a real JWT via `scripts/mint-jwt.mjs` (secret from `APP_SECURITY_JWT_SECRET`) and skips the suite cleanly when the app is not up. Playwright is intentionally outside the Maven build.
+> The Playwright specs need a running stack (`./dev.sh start` or `docker compose up -d`, app on `:8080`). `tests/e2e/global-setup.ts` mints a real JWT via `scripts/mint-jwt.mjs` (secret from `APP_SECURITY_JWT_SECRET`) and skips the suite cleanly when the app is not up — a skipped run is NOT a passing run (see `docs/principal_engineer_review_report.md`, finding C-01); `./dev.sh test --e2e` and CI both enforce zero-skipped via `scripts/e2e-assert.mjs`. Playwright and k6 are intentionally outside the Maven build.
 
 ## Observability
 
@@ -310,8 +341,8 @@ npx playwright test         # E2E against a running instance
   - Scrape path: **`/actuator/prometheus`** (unauthenticated for the bundled internal Prometheus; `/actuator/health*` and `/actuator/info` are also open — other actuator endpoints require a JWT)
 - **Correlation IDs:** `CorrelationIdFilter` reads or generates `X-Correlation-ID`, stores it in MDC (`correlationId`), and the same value is returned as `traceId` on every ProblemDetail error response.
 - **Structured logging:** logback JSON output via `LogstashEncoder` in the `prod` profile **or when no profile is active** (the `default` logback profile); plain-text console logs in the `dev`/`development` profile.
-- **Health:** `/actuator/health` includes a custom sync indicator with per-source `SUCCESS`/`FAILED` detail — distinguishes "process alive" from "ingestion functional".
-- **Compose extras:** Prometheus and Grafana containers start with default configuration; custom dashboards and alert rules are not shipped yet.
+- **Health:** `/actuator/health` includes a custom sync indicator (bean name `sync`), but `management.endpoint.health.show-details` is left at the Boot default (`never`) so anonymous callers only see `{"status":...}` — use `GET /v1/admin/sources` (ADMIN token) for per-source detail, which is what `./dev.sh status` and `./dev.sh seed` do.
+- **Compose extras:** Prometheus starts with default configuration. Grafana auto-provisions one dashboard (`grafana/dashboards/transact-overview.json` — ingestion outcomes, sync success/failure, HTTP latency/status, DB pool) at `http://localhost:3000` (admin/admin, dev-only). It covers what's instrumented today, not the Executive/Infra views or alert rules Phase 6 of `IMPLEMENTATION_PLAN.md` still tracks as open.
 
 ## Future Evolution
 
@@ -323,7 +354,9 @@ Not built today — deliberately deferred, not silently omitted:
 - **Materialized aggregates** when query volume justifies precomputed summaries (query-time SQL is the current model).
 - **Multi-region deployment** (cross-region replicas, failover runbooks) — single-region only today.
 - **Restore drills** for the recovery plan: RPO/RTO values in [`docs/recovery-plan.md`](docs/recovery-plan.md) are **targets only and untested**.
-- OpenTelemetry distributed tracing, K6 load tests, Terraform provisioning, and Grafana dashboards beyond the default containers.
+- OpenTelemetry distributed tracing and Terraform provisioning.
+- A K6 load test script now ships (`scripts/load-test.js`, run via `./dev.sh perf`) and one Grafana dashboard is auto-provisioned — neither has been run against a live, production-representative stack yet (no CI job for either), and Grafana's Executive/Infra views plus alert rules remain open (`IMPLEMENTATION_PLAN.md` Phase 6).
+- Local HTTPS for the API is available for demos (`./dev.sh certs && ./dev.sh start --tls`) but is self-signed and covers the API's own listener only — Postgres/Kafka traffic and inter-service mTLS stay plaintext; see **Phase 9: Bank Production Readiness** in `IMPLEMENTATION_PLAN.md`.
 
 ## Project Layout
 
@@ -340,6 +373,9 @@ src/main/java/za/co/evilcorp/transact/
   config/        wiring
 src/main/resources/db/migration/   Flyway V1 + V2
 tests/e2e/       Playwright specs
+scripts/         mint-jwt.mjs, e2e-assert.mjs, load-test.js (k6), test.sh
 helm/transact/   Kubernetes chart
-Dockerfile, docker-compose.yml, .github/workflows/ci.yml
+grafana/         provisioning/ (datasource + dashboard provider), dashboards/ (JSON)
+dev.sh           local dev/demo entrypoint — setup, start/stop/status/logs, seed, test, perf
+Dockerfile, docker-compose.yml, docker-compose.tls.yml, .github/workflows/ci.yml
 ```

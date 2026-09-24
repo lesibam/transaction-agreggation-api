@@ -2,6 +2,9 @@
 .env
 *.pem
 *.key
+*.p12
+*.jks
+certs/
 
 # Build artifacts
 target/

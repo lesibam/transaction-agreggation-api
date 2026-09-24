@@ -1,0 +1,102 @@
+{
+  "title": "Transact — Ingestion & API Overview",
+  "uid": "transact-overview",
+  "tags": ["transact"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "First-cut ingestion/API dashboard shipped with `./dev.sh start` (see `grafana/dashboards/`). Covers the metrics instrumented today (`transact.ingestion.*`, default `http.server.requests`, Hikari pool). It does **not** cover everything Phase 6 of `IMPLEMENTATION_PLAN.md` asks for (Executive/Infra views, SLO-breach alerting, Kafka consumer lag) — those remain open. Panel queries were written against known Micrometer→Prometheus naming conventions; sanity-check them against a live `/actuator/prometheus` scrape on first run."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Ingestion records by outcome (rate, per source)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (source) (rate(transact_ingestion_records_received_total[5m]))", "legendFormat": "received: {{source}}" },
+        { "expr": "sum by (source) (rate(transact_ingestion_records_published_total[5m]))", "legendFormat": "published: {{source}}" },
+        { "expr": "sum by (source) (rate(transact_ingestion_records_quarantined_total[5m]))", "legendFormat": "quarantined: {{source}}" },
+        { "expr": "sum by (source) (rate(transact_ingestion_records_duplicates_total[5m]))", "legendFormat": "duplicates: {{source}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Source sync outcome (rate)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (source) (rate(transact_ingestion_source_sync_success_total[5m]))", "legendFormat": "success: {{source}}" },
+        { "expr": "sum by (source) (rate(transact_ingestion_source_sync_failure_total[5m]))", "legendFormat": "failure: {{source}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Ingestion cycle duration (avg, per source)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(transact_ingestion_duration_seconds_sum[5m])) / sum by (source) (rate(transact_ingestion_duration_seconds_count[5m]))",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP request rate by status class",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (status) (rate(http_server_requests_seconds_count{status=~\"2..\"}[5m]))", "legendFormat": "2xx" },
+        { "expr": "sum by (status) (rate(http_server_requests_seconds_count{status=~\"4..\"}[5m]))", "legendFormat": "4xx" },
+        { "expr": "sum by (status) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))", "legendFormat": "5xx" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "API latency (avg, by URI)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (uri) (rate(http_server_requests_seconds_sum[5m])) / sum by (uri) (rate(http_server_requests_seconds_count[5m]))",
+          "legendFormat": "{{uri}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "DB connection pool (Hikari)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "hikaricp_connections_active", "legendFormat": "active" },
+        { "expr": "hikaricp_connections_idle", "legendFormat": "idle" },
+        { "expr": "hikaricp_connections_max", "legendFormat": "max" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}

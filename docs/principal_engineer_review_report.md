@@ -375,6 +375,8 @@ The original review's Assessment by Dimension didn't call this out explicitly, a
 
 `mvn compile` succeeded cleanly. Of the 9 test classes that don't require Testcontainers/`@SpringBootTest`, running them directly (`KeysetCursorTest`, `ResilienceTest`, `QuarantineTest`, `IdempotencyTest`, `SyncFailureTest`, `RuleBasedCategorizerTest`, `CustomerAccessValidatorTest`, `SourceAdapterNormalizationTest`, plus `IngestionServiceTest` which turned out to need a full Spring context) produced **56 run, 53 passed, 3 errors** — the 3 errors are `IngestionServiceTest` failing application-context startup, consistent with the missing datasource/Kafka broker in this sandbox (no Docker), not a code regression. The full 90-test Testcontainers suite and the composed-runtime E2E smoke were **not** re-run here; §10.1's confidence rests on CI's own gate definition and commit history, not a fresh live run. A reviewer with Docker access should still do one.
 
+> **Correction (2026-09-25, while building `dev.sh`):** `IdempotencyTest` does *not* belong in that "doesn't require Testcontainers" list — it `extends AbstractIntegrationTest`, which is `@SpringBootTest` + shared Testcontainers Postgres/Kafka. It happened to pass in the run above only because `IngestionServiceTest` hit the "no Docker" failure first in that particular execution order and absorbed all 3 reported errors; re-running the corrected 7-class subset (dropping both `IdempotencyTest` and `IngestionServiceTest`) is genuinely container-free and passed cleanly, 53/53, in this same Docker-less environment. `dev.sh`'s `UNIT_ONLY_TESTS` list uses the corrected 7 classes.
+
 ### 10.6 Updated Assessment by Dimension
 
 | Dimension | Prior (2026-09-23) | Now (2026-09-24) | Why it moved |
