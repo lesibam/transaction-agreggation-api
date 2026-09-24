@@ -114,10 +114,11 @@ The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done
     - **Availability**: Error rate < 0.1% for critical endpoints.
     - **Latency**: p99 response time < 200ms for transaction queries.
     - **Freshness**: 95% of sources synced within last 15 minutes.
-- [x] **Advanced Metric Instrumentation** *(delivered scope: Micrometer ingestion sync timer + record counters exposed at `/actuator/prometheus`; per-endpoint error counters, DB-query timers, and Kafka consumer-lag metrics NOT yet instrumented)*:
-    - **Error Rates**: Per-endpoint and per-source error counters (4xx vs 5xx).
-    - **Performance**: Timers for DB query execution and external API call latency.
-    - **Messaging**: Detailed Kafka consumer lag (offsets) and processing time per record.
+  Threshold-by-threshold feasibility (what's alertable today vs. blocked on new instrumentation) and the metrics/owner split with Operations/SRE Engineer are in `docs/observability-alerting-handoff.md`.
+- [x] **Advanced Metric Instrumentation** *(delivered scope: Micrometer ingestion sync timer + record counters exposed at `/actuator/prometheus`; DB-query timers and Kafka consumer-lag metrics NOT yet instrumented. Correction, 2026-09-25: per-endpoint error counters are NOT missing the way this line previously implied — Boot's default `http_server_requests_seconds_count` already carries `uri` and `status` tags, so a per-endpoint error-rate alert needs no new counter, only an alert rule against a metric that already exists. See `docs/observability-alerting-handoff.md` §3.1.)*:
+    - **Error Rates**: Per-endpoint and per-source error counters (4xx vs 5xx). *(Per-endpoint: already derivable from the default `http_server_requests_seconds_count`, see above. Per-source: covered separately by `transact.ingestion.source.sync.failure`, already emitted.)*
+    - **Performance**: Timers for DB query execution and external API call latency. *(Still genuinely not instrumented — no per-query timers exist; out of scope for the observability-alerting handoff, which only covers metrics that already exist or are one small change away.)*
+    - **Messaging**: Detailed Kafka consumer lag (offsets) and processing time per record. *(Still not instrumented — root cause and the one-method-call fix identified in `docs/observability-alerting-handoff.md` §3.5: `KafkaConsumerConfig` builds its `ConsumerFactory` manually and never registers a `MicrometerConsumerListener`.)*
 - [ ] **Distributed Tracing**: Implement OpenTelemetry trace propagation across the ingestion pipeline and API.
 - [x] **Structured Logging**: JSON logback output (`LogstashEncoder`) in the `prod` profile or when no profile is active, with Correlation IDs (`X-Correlation-ID` → MDC `correlationId`) for request-flow reconstruction. *(Span IDs require the OpenTelemetry item above — not delivered.)*
 - [x] **Intelligent Health Checks**: `SyncHealthIndicator` distinguishes "process alive" from "functional capability" — overall `/actuator/health` `status` flips to `DOWN` if any source isn't `SUCCESS`. *(Correction, found 2026-09-25: per-source detail is NOT visible at `/actuator/health` itself — `management.endpoint.health.show-details` is left at the Boot default (`never`), so anonymous callers only ever see `{"status":...}`, matching the plain response captured in the C-01 incident postmortem. `GET /v1/admin/sources` (ADMIN token) is the actual way to see per-source `SUCCESS`/`FAILED` detail today; `./dev.sh status`/`seed` use it for exactly this reason.)*
@@ -126,7 +127,7 @@ The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done
     - **Ingestion View**: Source freshness, sync failure rates, and lag.
     - **Infra View**: JVM memory, DB connection pool saturation, and CPU usage.
   *(A first dashboard now auto-provisions with `./dev.sh start` — `grafana/dashboards/transact-overview.json`: ingestion outcomes, sync success/failure, HTTP latency/status, DB pool. It's an Ingestion-View-shaped start, not the Executive or Infra views above, and ships no alert rules.)*
-- [ ] **Alerting Strategy**: Configure alerts for SLI breaches, high error spikes, and critical consumer lag thresholds.
+- [ ] **Alerting Strategy**: Configure alerts for SLI breaches, high error spikes, and critical consumer lag thresholds. *(`docs/observability-alerting-handoff.md` has proposed alert rules/thresholds ready to implement today for 3 of 7 identified SLIs — API error rate, ingestion failure rate, DB pool saturation — with no new instrumentation required; still open pending SRE actually writing the rules.)*
 
 ### Phase 7: Quality Assurance & Performance
 *Goal: Proving the system meets the "Staff Engineer" bar.*
