@@ -8,6 +8,8 @@ This document serves as the master implementation roadmap for the **Transact** p
 
 **Objective**: Build a production-grade system to aggregate, normalize, and categorize financial transactions from heterogeneous sources, exposing them via a query-oriented API.
 
+> **Scope note.** Phases 0–8 target the bar set by the Staff Engineer Guide, which explicitly discourages over-building infrastructure for an assessment exercise (see guide §85, "What Not to Build"). That is a different, lower bar than "safe to run in a real bank's production environment." **Phase 9** below is the gap between the two — see `docs/principal_engineer_review_report.md` for the review that identified it. Completing Phases 0–8 alone does not make this system bank production-ready.
+
 **Core Tech Stack**:
 - **Build Tool**: Maven 3.9+
 - **Runtime**: Java 21 / Spring Boot 4.1.1
@@ -45,6 +47,7 @@ Every task in this plan must adhere to these "Staff Engineer" constraints:
 | **6: SRE** | SRE | Architect, Integration | `Dockerfile`, `docker-compose.yml` |
 | **7: QA** | Testing | All | `src/test/`, `tests/e2e/` |
 | **8: Deploy** | SRE | Architect | `helm/`, `.github/workflows/` |
+| **9: Bank Production Readiness** | Architect | Security, SRE, DBA, Coordinator | `helm/`, `security/`, `infrastructure/`, `docs/recovery-plan.md` |
 | **Ongoing: Retrospective** | Meta-Agent | Coordinator | `claude.md` (proposals only), `docs/retrospectives/` |
 
 The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done" (§6) and after any incident, feeding evidence-backed proposals back into this document and `claude.md` rather than owning implementation code.
@@ -139,6 +142,24 @@ The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done
 - [x] **Orchestration**: Create Helm charts for Kubernetes deployment.
 - [x] **CI Pipeline**: Automate: `Compile → Test → Scan → Publish → Deploy`. *(Verified green on remote runs 2026-09-23 (`github.com/lesibam/transaction-agreggation-api`): build + 90-test Testcontainers suite → containerize with a **blocking** Trivy gate (CRITICAL/HIGH, `ignore-unfixed`; dated exceptions in `.trivyignore`) — the gate caught and drove the fix of three CRITICAL embedded-Tomcat CVEs (`4807e23`) → `e2e-smoke`: compose stack on the runner, health/auth/RFC-7807 contract assertions, Playwright with **zero-skipped enforcement** (`scripts/e2e-assert.mjs`) → publish/deploy steps conditional on Docker Hub / KUBECONFIG secrets by design (forks don't fail). `main` is protected: required checks, linear history, no force pushes/deletions.)*
 - [ ] **Recovery Plan**: Document and test the database restore process (RPO/RTO verification). *(Plan documented in `docs/recovery-plan.md` as UNTESTED targets — no restore drill executed, so this stays open.)*
+
+### Phase 9: Bank Production Readiness
+*Goal: Close the gap between "meets the Staff Engineer Guide's bar" and "safe to carry a real bank's transaction data in production." None of this phase is required by the guide (§85 "What Not to Build" explicitly discourages this kind of infrastructure for an assessment exercise) — it exists because a regulated financial institution has different, stricter constraints than a take-home. Nothing in this phase is delivered today; every item below was identified in `docs/principal_engineer_review_report.md`'s bank-readiness assessment (2026-09-24).*
+
+- [ ] **High-Availability Data Topology**: Replace the single-instance Postgres, Kafka, and Zookeeper in `docker-compose.yml` with a replicated topology (managed Postgres with standby/read replicas, Kafka with `replication.factor >= 3` spread across brokers/AZs, or managed equivalents) with tested automatic failover.
+- [ ] **Multi-Replica, Zero-Downtime Deploys**: Raise `helm/transact/values.yaml`'s `replicaCount` (currently `1`) with a `PodDisruptionBudget`, `HorizontalPodAutoscaler`, pod anti-affinity across nodes/AZs, and a rolling-update or blue/green strategy, so a `helm upgrade` is never a visible outage.
+- [ ] **Encryption in Transit**: TLS for every hop — client↔API, API↔Postgres (`sslmode=verify-full`), and API↔Kafka — replacing the `PLAINTEXT` listener map in `docker-compose.yml` and the unencrypted JDBC URL in `application.yml`; mTLS between internal services.
+- [ ] **Encryption at Rest & Key Management**: Encrypted Postgres/Kafka volumes and backups; secrets sourced from a managed KMS/secrets manager instead of Helm's `.Values.secret.*` → rendered `Secret` pattern (principal engineer review, M-06), with rotation.
+- [ ] **Enterprise Identity & Access**: Replace the symmetric pre-shared-secret JWT (`JwtTokenProvider`) with asymmetric signing (RS256/ES256) validated against a JWKS endpoint from a real IdP (Okta/Entra/Keycloak), MFA enforced at the IdP, short-lived access tokens with refresh/revocation, and either wire `TenantContext`'s `tenantId` claim into real query-time scoping or remove it (principal engineer review, M-03 — a control that looks implemented but has no readers is worse than no control for an auditor).
+- [ ] **Rate Limiting & Abuse Protection**: Per-client/per-token rate limiting (e.g., Resilience4j `RateLimiter` or an API gateway) and WAF/DDoS protection in front of the public endpoint — neither exists today.
+- [ ] **Circuit Breakers & Bulkheads**: Deliver the Resilience4j work already flagged as deferred in `README.md` Future Evolution and §2 above — required before any real outbound source call (replacing today's in-process mock adapters) reaches production.
+- [ ] **Source Reconciliation**: A scheduled job that compares ingested record counts/sums against each source system's own totals for the same window and alerts on drift, so "the aggregation matches the source of truth" is a monitored fact, not an assumption. Not implemented, and not referenced anywhere outside one ADR's prose today.
+- [ ] **Executed Disaster Recovery Drills**: Actually run the restore procedure in `docs/recovery-plan.md` against a real backup and measure RPO/RTO. Today the plan is explicitly an untested draft runbook, not evidence of recoverability.
+- [ ] **Governance & Change Control**: `CODEOWNERS` and mandatory dual review for changes under `domain/`, `security/`, and `db/migration/`; an audit trail for administrative actions (categorization rule changes, manual reprocessing) distinct from row-level `created_by`/`updated_by`; a documented change-advisory/release-approval process.
+- [ ] **Data Classification & Retention**: A documented PII/data-classification policy and a retention/erasure procedure aligned to the applicable regime (POPIA, given `za.co.evilcorp`), reviewed before any real source adapter — replacing today's mock adapters — carries real customer data.
+- [ ] **Independent Security Testing**: A penetration test and a SAST/dependency review beyond Trivy's image scan, completed before production go-live.
+
+*Dependency note: this phase assumes Phase 6's and Phase 7's remaining open items (Distributed Tracing, Operational Dashboards, Alerting Strategy, Load Testing, Failure Injection) are also closed — none of the items above substitute for them.*
 
 ---
 
