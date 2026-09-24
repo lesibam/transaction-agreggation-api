@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import za.co.evilcorp.transact.support.AbstractIntegrationTest;
 
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -79,5 +81,39 @@ class ApiValidationTest extends AbstractIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.headers().firstValue("Content-Type").orElse(""))
             .startsWith("application/json");
+    }
+
+    // These two guard the fix in GlobalExceptionHandler (M-04): before it, the
+    // Exception.class catch-all turned both cases into a generic 500 instead
+    // of the correct 405/404, because it matched before Boot's own handling
+    // for these specific exception types ever got a chance to run.
+    @Test
+    void wrongHttpMethodReturnsProblemDetail405() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("http://localhost:" + port + path))
+            .header("Authorization", "Bearer " + token)
+            .header("Accept", "application/json")
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(405);
+        assertThat(response.headers().firstValue("Content-Type").orElse(""))
+            .startsWith("application/problem+json");
+        JsonNode body = jsonBody(response);
+        assertThat(body.get("type").asText()).contains("method-not-allowed");
+        assertThat(body.get("status").asInt()).isEqualTo(405);
+    }
+
+    @Test
+    void unknownRouteReturnsProblemDetail404() {
+        HttpResponse<String> response = get("/v1/this-route-does-not-exist", token);
+
+        assertThat(response.statusCode()).isEqualTo(404);
+        assertThat(response.headers().firstValue("Content-Type").orElse(""))
+            .startsWith("application/problem+json");
+        JsonNode body = jsonBody(response);
+        assertThat(body.get("type").asText()).contains("not-found");
+        assertThat(body.get("status").asInt()).isEqualTo(404);
     }
 }
