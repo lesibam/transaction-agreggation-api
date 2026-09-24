@@ -16,6 +16,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Consistency models (Eventual Consistency with freshness metadata).
   - Scaling strategies and Infrastructure-as-Code (Terraform/Helm).
   - Authoring and reviewing Architecture Decision Records (ADRs).
+  - Before introducing new infrastructure (a deployment target, datastore, or broker), cross-checking it against the requirements guide's "What Not to Build" list and writing the justifying ADR when a listed item is genuinely needed (see `docs/retrospectives/LESSONS.md`, 2026-09-24).
 - **Ownership**: `docs/adr/`, `infrastructure/`
 
 ### 3. Domain Expert

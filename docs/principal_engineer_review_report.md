@@ -8,6 +8,8 @@
 | **Baseline reviewed** | Working tree (no VCS baseline exists — see H-01) |
 | **Method** | Full source review (72 main + 19 test classes), dependency/image inspection, two full `mvn test` runs, live docker-compose deployment, in-container HTTP probes, first genuine Playwright E2E execution |
 
+> **Update (2026-09-24):** An independent follow-up review verified all three sign-off conditions below are now closed and found one new (non-blocking) scope finding. **Current verdict: Pass.** See §10 for the follow-up and §9 for the original conditions it discharges.
+
 ---
 
 ## 1. Executive Summary
@@ -322,6 +324,72 @@ Sign-off is withheld pending exactly three conditions — all process, all small
 3. The E2E/compose verification wired into CI with a no-skipped assertion.
 
 When those land, this codebase is in the top tier of what I would expect to hand to production engineering for the next stage (real source adapters, SLIs, load profiles) — the foundations (idempotency, honesty of metadata, failure taxonomy) are the hard parts, and they are right.
+
+---
+
+## 10. Follow-up Review — 2026-09-24 (Independent Verification)
+
+**Reviewer.** A separate principal-engineer pass, one day later, in a sandboxed review environment with **no Docker daemon available** (`docker info` fails). This constrains the method: git history, the CI workflow definition, and static source/config inspection substitute for live compose/Testcontainers runs. Where that matters, it is called out explicitly rather than silently assumed.
+
+### 10.1 P0 remediation — verified CLOSED
+
+All three sign-off conditions from §9 are independently confirmed in the tree, not just claimed in `IMPLEMENTATION_PLAN.md`:
+
+| Condition | Evidence | Status |
+|---|---|---|
+| H-01 version control | `git log --oneline` shows 5 commits from `12fa9b1` (baseline) through `d1f7ae6`; a real history exists, `.env` is not tracked | **Closed** |
+| H-02 blocking Trivy | `.github/workflows/ci.yml:50-57` — `exit-code: '1'`, `severity: CRITICAL,HIGH`, `ignore-unfixed: true`; commit `4807e23` shows this gate actually caught and drove a fix (embedded Tomcat CVEs) | **Closed** |
+| H-03 / C-01 composed-runtime + zero-skipped E2E in CI | `.github/workflows/ci.yml:81-139` (`e2e-smoke` job) boots the real compose stack, asserts the auth/error contract over HTTP, then runs Playwright through `scripts/e2e-assert.mjs` which fails the job on any `status: "skipped"` | **Closed** |
+
+This is real remediation, not documentation theater — each fix is a genuine control (a failing exit code, a real HTTP assertion), not a comment saying it was done.
+
+### 10.2 P1/P2 findings — re-checked, unchanged
+
+Every Medium/Low finding from §4 was re-verified directly against current source. All are **still open**, byte-for-byte as originally described — three commits landed since baseline and all three were process/CI-only (`582831f`, `4807e23`, `d1f7ae6`); none touched application code:
+
+- **M-01** — `application.yml:22-23` still sets `spring.json.trusted.packages: "*"` / a default type, dead against `KafkaConsumerConfig`'s own factory. Unchanged.
+- **M-03** — `TenantContext` still has exactly one writer (`JwtAuthenticationFilter`) and zero readers repo-wide. Unchanged.
+- **M-07** — `spring.jpa.open-in-view` is still absent from `application.yml` (Boot default `true` still applies, still WARNs on boot). Unchanged.
+- **L-01** — `transactions.direction` is still a bare `VARCHAR(10)` with a comment, no `CHECK`, in both V1 and V2. Unchanged.
+- **L-03** — `scripts/mint-jwt.mjs:17-18` still falls back to the committed test secret with no stderr warning. Unchanged.
+- **L-04** — `TransactionRepository.java:77-78` still computes `debitCount`/`creditCount`; `SummaryDto.CurrencySummary` still has no fields for them. Unchanged.
+- **L-05** — `CorrelationIdFilter.java` still only writes MDC; it never calls `response.setHeader(...)`. Unchanged.
+
+**This is itself the finding.** The prior report's P0/P1/P2 tiering worked exactly as designed — the three items gating sign-off got fixed, and the rest did not move, because nothing forces them to. That is a reasonable prioritization outcome for a first pass, but if it repeats across further review cycles, "Medium" becomes a polite synonym for "never." See the logged lesson in §10.5.
+
+### 10.3 New finding: N-01 — Helm/Kubernetes deployment contradicts the guide's own explicit scope guidance (Medium, Architecture/Scope)
+
+**Evidence.** `transaction-aggregation-staff-engineer-guide-2.md` §85 ("What Not to Build") lists **Kubernetes** first among the things to avoid "unless the requirements specifically demand them," framing the exercise as demonstrating *restraint*, not technology breadth. §96K ("Deployment Environments") is concrete about what "demo" should be: *"demo: Docker Compose or small VPS."* §96L reinforces it: *"If the assessment requires a deployed demonstration, a small Linux VPS is sufficient."*
+
+The delivered system instead ships a full Helm chart (`helm/transact/templates/{deployment,service,secret,...}.yaml`) and a CI job (`deploy-demo` in `.github/workflows/ci.yml:147-167`) that runs `helm upgrade --install` against a Kubernetes cluster for the demo environment — the exact shape of scope the guide asks candidates to justify or avoid.
+
+**Why it matters.** Nothing in `docs/adr/` addresses *why* Kubernetes was chosen for a demo tier the guide explicitly says doesn't need it (grep of `docs/adr/*.md` for "kubernetes"/"helm" — no results). Compare this to how well-justified the rest of the stack is: ten ADRs cover Postgres, eventual consistency, idempotency, the messaging port, etc., each closing with "why not the alternative." Kubernetes is the one infrastructure decision in the tree with no ADR and no justification against the guide's own checklist — it reads as reached-for rather than chosen. This doesn't cost correctness points, but it does cost the "knows when not to use it" signal the guide says is the actual thing being assessed (§85: *"The goal is not to demonstrate how many technologies you can deploy... The goal is to demonstrate that you know when not to use them."*).
+
+**Recommendation.** Either (a) add an ADR-011 stating the concrete reason Kubernetes is in scope (e.g., "target platform is already Kubernetes at evilcorp, demo must match production" — if true, this is a good reason and just needs to be written down), or (b) keep the Helm chart as documented **future evolution** (it's genuinely fine engineering) but stop running `deploy-demo` by default — point the demo tier at Compose on a VPS per §96L, matching what the guide actually asked for.
+
+### 10.4 Correction to §7: duplicate records ARE measurable
+
+The original review's Assessment by Dimension didn't call this out explicitly, and the Design Review Checklist item ("Are duplicate records measurable?") deserves a direct answer: **yes** — `TransactionIngestedListener.java:50` increments `transact.ingestion.records.duplicates` (tagged by `source`) every time the unique-constraint path is taken, alongside `transact.ingestion.records.received/published/quarantined` and `transact.ingestion.source.sync.success/failure` in `IngestionService.java`. This is a real strength that should be listed alongside the other verified-metrics items in §3.11, not left implicit.
+
+### 10.5 Verification note on this pass's own limits
+
+`mvn compile` succeeded cleanly. Of the 9 test classes that don't require Testcontainers/`@SpringBootTest`, running them directly (`KeysetCursorTest`, `ResilienceTest`, `QuarantineTest`, `IdempotencyTest`, `SyncFailureTest`, `RuleBasedCategorizerTest`, `CustomerAccessValidatorTest`, `SourceAdapterNormalizationTest`, plus `IngestionServiceTest` which turned out to need a full Spring context) produced **56 run, 53 passed, 3 errors** — the 3 errors are `IngestionServiceTest` failing application-context startup, consistent with the missing datasource/Kafka broker in this sandbox (no Docker), not a code regression. The full 90-test Testcontainers suite and the composed-runtime E2E smoke were **not** re-run here; §10.1's confidence rests on CI's own gate definition and commit history, not a fresh live run. A reviewer with Docker access should still do one.
+
+### 10.6 Updated Assessment by Dimension
+
+| Dimension | Prior (2026-09-23) | Now (2026-09-24) | Why it moved |
+|---|---|---|---|
+| Delivery & process | 4/10 | **9/10** | All three P0 gates (VCS, blocking scan, zero-skipped composed E2E in CI) verified closed with real controls, not just claims |
+| Architecture & boundaries | 9/10 | **8/10** | Same strengths (TenantContext aside) minus one point for N-01 — the one infrastructure choice in the tree without an ADR, and one the guide explicitly flags |
+| All other dimensions | as §7 | **unchanged** | No application code changed since the baseline review; re-verified, not re-scored |
+
+### 10.7 Updated Verdict
+
+**Pass** (upgraded from Conditional Pass). All three sign-off conditions from §9 are met. Remaining Medium/Low items are real but non-blocking technical debt, explicitly tracked, none of them safety- or correctness-critical. The one new item (N-01) is a scope-justification gap, not a defect — closing it is a paperwork fix (write the ADR) or a scope-reduction fix (stop deploying to K8s by default), not an engineering one.
+
+### 10.8 Lessons logged
+
+Per the Continuous Improvement Loop (`claude.md` §11, added 2026-09-24), the following were logged to `docs/retrospectives/LESSONS.md` as a result of this review: non-blocking findings not converging across cycles without a forcing function, and new infrastructure not being checked against the guide's own "What Not to Build" list before being added. One resulting change was applied directly to the Architect agent's definition in `claude.md` (see the lessons log for the exact diff and rationale).
 
 ---
 
