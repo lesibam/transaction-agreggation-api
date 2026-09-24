@@ -82,7 +82,7 @@ These are not compliments — each is verified against source or a running syste
 | M-03 | Medium | Security clarity | `TenantContext` is a write-only ThreadLocal; `tenantId` claim never used for scoping | **Fixed 2026-09-25** — deleted, see §5 |
 | M-04 | Medium | Fragility | `@Order(HIGHEST_PRECEDENCE)` coupling to Boot's ProblemDetailsExceptionHandler | Open (guarded by tests) |
 | M-05 | Medium | Contract | `openapi.yaml` hand-maintained; no automated contract verification | Open |
-| M-06 | Medium | Secrets | Helm chart materializes secrets from `.Values` into release metadata | Open |
+| M-06 | Medium | Secrets | Helm chart materializes secrets from `.Values` into release metadata | **Partially fixed 2026-09-25** — see §5 |
 | M-07 | Medium | Config | `spring.jpa.open-in-view` left default (WARN on every boot) | Open |
 | L-01 | Low | Data | No `CHECK` constraint on `transactions.direction` (`DEBIT`/`CREDIT`) | **Fixed 2026-09-25** — see §5 |
 | L-02 | Low | Ingestion | Mock adapters ignore the cursor for data generation → duplicate publishes every cycle | By design (mock), note |
@@ -223,6 +223,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 **Evidence.** `helm/transact/templates/secret.yaml:8-10` materializes `SPRING_DATASOURCE_PASSWORD` and `APP_SECURITY_JWT_SECRET` from `.Values.secret.*`. Helm stores rendered values in release metadata (and often in CI shell history via `--set`).
 
 **Recommendation.** For the demo cluster this is tolerable and clearly labeled; before any production claim, switch to ExternalSecrets/SealedSecrets or at minimum document a rotation procedure and forbid `--set secret.*` in runbooks. Add a values schema that refuses empty secret values (fail helm template early).
+
+> **Partially fixed 2026-09-25.** The "refuses empty secret values" half is done: `helm/transact/templates/secret.yaml` now calls `fail` if either secret is empty *or* still equal to its `values.yaml` placeholder default, so a `helm install` with no `--set` overrides errors out instead of silently shipping `change-me-dev-only` to a real cluster. `.github/workflows/ci.yml`'s `deploy-demo` job updated to pass `secret.springDatasourcePassword`/`secret.appSecurityJwtSecret` from two new GitHub Actions secrets it didn't need before (`DEMO_SPRING_DATASOURCE_PASSWORD`, `DEMO_APP_SECURITY_JWT_SECRET`) — **neither is configured on this repo today**, so if `KUBECONFIG` is ever added to actually enable that job, these two must be added alongside it or the Helm render will fail by design. **Not fixed**: the underlying ExternalSecrets/SealedSecrets migration and a documented rotation procedure — real infra work needing a target platform, still open. **Unverified**: no `helm` binary was reachable in this environment (egress to `get.helm.sh` and `github.com/helm/helm/releases` both blocked by the proxy policy) — the template change was written against well-established Helm/Sprig syntax (`fail`, `empty`, `eq`, `or`) but never run through `helm template`/`helm lint`. Run `helm lint ./helm/transact` and `helm template ./helm/transact --set secret.springDatasourcePassword=x --set secret.appSecurityJwtSecret=y` before trusting this in CI.
 
 ---
 

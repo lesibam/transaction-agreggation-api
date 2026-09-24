@@ -142,14 +142,21 @@ jobs:
         if: always()
         run: docker compose down -v --remove-orphans
 
-  # Requires the KUBECONFIG secret in the `demo` environment.
-  # Steps are skipped when the secret is absent so the job does not fail on forks/setups without a cluster.
+  # Requires the KUBECONFIG secret in the `demo` environment, plus
+  # DEMO_SPRING_DATASOURCE_PASSWORD and DEMO_APP_SECURITY_JWT_SECRET (added
+  # alongside the helm/transact/templates/secret.yaml guard that now refuses
+  # to render with the values.yaml placeholder defaults - see
+  # docs/principal_engineer_review_report.md M-06). None of the three are
+  # configured on this repo today, so this job's Deploy step is a no-op.
+  # Steps are skipped when KUBECONFIG is absent so the job does not fail on forks/setups without a cluster.
   deploy-demo:
     needs: [containerize, e2e-smoke]
     runs-on: ubuntu-latest
     environment: demo
     env:
       KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+      DEMO_SPRING_DATASOURCE_PASSWORD: ${{ secrets.DEMO_SPRING_DATASOURCE_PASSWORD }}
+      DEMO_APP_SECURITY_JWT_SECRET: ${{ secrets.DEMO_APP_SECURITY_JWT_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -164,4 +171,6 @@ jobs:
           chmod 600 "$HOME/.kube/config"
           helm upgrade --install transact ./helm/transact \
             --set image.tag=${{ github.sha }} \
+            --set secret.springDatasourcePassword="$DEMO_SPRING_DATASOURCE_PASSWORD" \
+            --set secret.appSecurityJwtSecret="$DEMO_APP_SECURITY_JWT_SECRET" \
             --namespace transact-demo --create-namespace
