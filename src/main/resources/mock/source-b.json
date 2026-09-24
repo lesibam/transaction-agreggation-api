@@ -1,0 +1,4 @@
+[
+  {"transactionReference": "B-REF-001", "value": -45, "currencyCode": "ZAR", "merchantInfo": "Coffee Shop B", "merchantName": "STARBUCKS", "timestamp": "2026-09-23T06:00:00Z"},
+  {"transactionReference": "B-REF-002", "value": -120.5, "currencyCode": "ZAR", "merchantInfo": "Food delivery", "merchantName": "UBER EATS", "timestamp": "2026-09-23T08:00:00Z"}
+]

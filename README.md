@@ -186,10 +186,91 @@ Details: [`docs/02-domain-model.md`](docs/02-domain-model.md).
 ## Ingestion
 
 1. **Scheduler (ShedLock)** fires every `app.ingestion.interval-ms` (default 60 s in `application.yml`; Compose overrides via `APP_INGESTION_INTERVAL_MS`, also 60 s by default). ShedLock ensures only one instance runs a cycle.
-2. Each **source adapter** (`SourceA/B/CAdapter`) reads its cursor from `source_sync_state`, produces mock records, and **normalizes inside the adapter** to `CanonicalTransaction` (`normalizationVersion` recorded).
+2. Each registered source's transport adapter (from `app.sources.registry`, see [Sources](#sources)) reads its cursor from `source_sync_state`, fetches raw records, and normalizes via the source's `SourceNormalizer` strategy (`infrastructure/integration/normalizer`, keyed by the registry's `normalizer` field) to `CanonicalTransaction` (`normalizationVersion` recorded).
 3. The adapter publishes a `TransactionIngestedEvent` through `TransactionEventPublisher` → Kafka topic **`transactions.ingested`** (at-least-once).
 4. The **Kafka consumer** applies the deterministic categorizer (`ruleId` + `category_version` persisted) and inserts idempotently; duplicates are skipped via the unique constraint, not check-then-insert.
 5. **Sync state** is updated: `SUCCESS` (cursor advanced, `last_successful_sync` set) or `FAILED` (`failure_count` incremented, `last_error` captured).
+
+## Sources
+
+**The registry is config; the semantics are code.** One YAML list — `app.sources.registry` in `application.yml` — drives both the ingestion pipeline and the freshness/completeness metadata. Each entry is a `SourceDescriptor`: transport (`type` plus a per-type config block), identity (`id`), operational state (`enabled`), and a `normalizer` key selecting the code-owned `SourceNormalizer` strategy (`infrastructure/integration/normalizer`) that maps the raw payload to `CanonicalTransaction`. The committed default registry ships exactly three MOCK sources so the demo and E2E stay stable; KAFKA/S3/HTTP sources are added per environment via YAML or the `s3demo` profile below.
+
+| Type | Fetches from | Cursor semantics (`source_sync_state`) |
+| :--- | :--- | :--- |
+| `MOCK` | classpath JSON file (`mock.data-location`) | `MOCK_EXHAUSTED` marker once the file is consumed |
+| `KAFKA` | external topic | `partition:offset` CSV (at-least-once); `auto-offset-reset` applies only to the first fetch |
+| `S3` | object listing under `prefix` (MinIO/AWS via `endpoint` override) | last object key — next fetch lists with `startAfter` |
+| `HTTP` | `GET base-url` + `path` | opaque cursor query param; response contract `{"records": [...], "nextCursor": "..."}` |
+
+All four types, with the exact descriptor fields:
+
+```yaml
+app:
+  sources:
+    registry:
+      - id: SOURCE_A                      # MOCK — classpath JSON file
+        name: "Source A (bank feed)"
+        enabled: true
+        type: MOCK
+        normalizer: source-a-v1
+        mock:
+          data-location: classpath:mock/source-a.json
+      - id: SOURCE_LEDGER                 # KAFKA — external topic
+        name: "Partner ledger feed"
+        enabled: true
+        type: KAFKA
+        normalizer: source-b-v1
+        kafka:
+          bootstrap-servers: kafka:29092
+          topic: partner.ledger.raw
+          group-id: transact-source-ledger
+          auto-offset-reset: earliest     # first fetch only
+          poll-timeout-ms: 2000
+          max-poll-records: 500
+      - id: SOURCE_D                       # S3 — MinIO/AWS object prefix
+        name: "Source D (S3/MinIO file drop)"
+        enabled: true
+        type: S3
+        normalizer: source-c-v1            # transport ≠ payload shape
+        s3:
+          endpoint: http://minio:9000
+          region: us-east-1
+          bucket: transact-sources
+          prefix: source-d/
+          access-key: minioadmin
+          secret-key: minioadmin
+          max-keys-per-fetch: 10
+      - id: SOURCE_E                        # HTTP — GET base-url + path
+        name: "Source E (partner API)"
+        enabled: true
+        type: HTTP
+        normalizer: source-a-v1
+        http:
+          base-url: https://partner.example.com
+          path: /v1/transactions
+          cursor-param: cursor             # opaque, passed through verbatim
+          connect-timeout: 5s
+          read-timeout: 10s
+```
+
+Rules that keep the registry honest:
+
+- **Disabled sources are never hidden.** `enabled: false` stops a source's sync cycles but keeps it in freshness metadata as `UNKNOWN`, forcing `completeness = PARTIAL` — the API never presents data as complete while a registered source is not syncing (ADR-008). Delete the entry to retire a source for real.
+- **Startup fails fast** on an unknown `normalizer` key, a duplicate `id`, or a missing config block for the declared `type` — misconfiguration surfaces on deploy, not as a mystery `FAILED` cycle.
+- **New payload shape = new code + one entry.** Write a `SourceNormalizer` strategy in `infrastructure/integration/normalizer` (its `key()` is the registry's `normalizer` value) with its own unit tests, then reference it from a registry entry. Transports are reused as-is.
+
+**S3/MinIO demo (`s3demo` profile).** The compose file ships MinIO (host console: `http://localhost:19001`) and a one-shot seed job that uploads `mock-s3/` into bucket `transact-sources` (dev-only `minioadmin`/`minioadmin` credentials). To see a real fourth source:
+
+```bash
+docker compose up -d                     # starts MinIO and runs the seed job
+docker compose stop transaction-api
+docker compose run -d --name transaction-api --service-ports \
+  -e SPRING_PROFILES_ACTIVE=s3demo transaction-api
+```
+
+After the first sync cycle (~60 s), `SOURCE_D` appears on `/v1/admin/sources` (with an `UNKNOWN` status until its first sync completes) and in freshness metadata as a fourth source; the seeded records categorize as `GROCERIES` (CHECKERS) and `ENTERTAINMENT` (NETFLIX). `docker compose down` restores the default stack.
+
+Full rationale and rejected alternatives (including why normalization is *not* a YAML field-mapping DSL): [`docs/adr/011-config-driven-source-registry.md`](docs/adr/011-config-driven-source-registry.md) (ADR-011).
 
 ## Failure Handling
 

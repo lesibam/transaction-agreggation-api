@@ -43,7 +43,32 @@ app:
     fresh-seconds: 300
     stale-seconds: 1800
   sources:
-    ids: SOURCE_A,SOURCE_B,SOURCE_C
+    # Single registry (ADR-011): drives both the ingestion pipeline and the
+    # API's freshness/completeness metadata. Transport is config; payload
+    # semantics live in code (SourceNormalizer strategies keyed by `normalizer`).
+    # Kafka/S3/HTTP examples: see README "Sources" and ADR-011.
+    registry:
+      - id: SOURCE_A
+        name: "Source A (bank feed)"
+        enabled: true
+        type: MOCK
+        normalizer: source-a-v1
+        mock:
+          data-location: classpath:mock/source-a.json
+      - id: SOURCE_B
+        name: "Source B (card processor)"
+        enabled: true
+        type: MOCK
+        normalizer: source-b-v1
+        mock:
+          data-location: classpath:mock/source-b.json
+      - id: SOURCE_C
+        name: "Source C (retail gateway)"
+        enabled: true
+        type: MOCK
+        normalizer: source-c-v1
+        mock:
+          data-location: classpath:mock/source-c.json
 
 management:
   endpoints:

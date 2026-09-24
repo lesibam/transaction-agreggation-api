@@ -1,0 +1,4 @@
+[
+  {"tx_id": "D-100", "tx_amount": -250.75, "tx_currency": "ZAR", "tx_desc": "CHECKERS Rondebosch", "merchantName": "CHECKERS", "tx_date": "2026-09-24T08:15:00Z"},
+  {"tx_id": "D-101", "tx_amount": -189.99, "tx_currency": "ZAR", "tx_desc": "NETFLIX.COM subscription", "merchantName": "NETFLIX", "tx_date": "2026-09-24T09:42:00Z"}
+]

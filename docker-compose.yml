@@ -48,6 +48,55 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # MinIO (S3-compatible object store) for the optional `s3demo` source
+  # profile (ADR-011). DEV-ONLY credentials. Host ports 19000/19001 avoid
+  # common local collisions. The Bitnami image runs the daemon as uid 1001;
+  # `user: "0"` only lets its entrypoint fix named-volume ownership on first
+  # boot. The image ships `mc`, so the healthcheck uses `mc ready local`
+  # (which reads MINIO_ROOT_USER/MINIO_ROOT_PASSWORD).
+  # NOTE: MinIO removed their own images (minio/minio, minio/mc) from Docker
+  # Hub; this is the verified pullable mirror (see README "Sources").
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    ports:
+      # S3 API on 19000, web console on 19001.
+      - "19000:9000"
+      - "19001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/bitnami/minio/data
+    user: "0"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # One-shot seed job, dev-only creds: uploads ./mock-s3 into the bucket the
+  # s3demo profile reads (transact-sources). Safe to re-run
+  # (--ignore-existing; cp -r overwrites in place).
+  minio-seed:
+    image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./mock-s3:/seed:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 minioadmin minioadmin
+        mc mb --ignore-existing local/transact-sources
+        mc cp -r /seed/source-d local/transact-sources/
+        echo "seeded"
+    restart: "no"
+
   transaction-api:
     build: .
     # Explicit tag: CI prebuilds this image with buildx (GHA layer cache) and
@@ -93,3 +142,4 @@ services:
 
 volumes:
   postgres_data:
+  minio_data:

@@ -1,5 +1,6 @@
 package za.co.evilcorp.transact.config;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +18,9 @@ public class Jackson2Config {
     public ObjectMapper jackson2ObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
+        // JSON numbers parse to BigDecimal (not double) so monetary fields
+        // survive normalization without binary rounding artifacts.
+        mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
         return mapper;
     }
 }

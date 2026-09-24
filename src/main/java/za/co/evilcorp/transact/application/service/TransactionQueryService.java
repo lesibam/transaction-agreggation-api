@@ -16,6 +16,7 @@ import za.co.evilcorp.transact.application.dto.SourceStatusResult;
 import za.co.evilcorp.transact.application.dto.SummaryResult;
 import za.co.evilcorp.transact.application.dto.TransactionListResult;
 import za.co.evilcorp.transact.application.dto.TransactionView;
+import za.co.evilcorp.transact.config.SourceRegistryProperties;
 import za.co.evilcorp.transact.domain.model.TransactionDirection;
 import za.co.evilcorp.transact.infrastructure.persistence.entity.SourceSyncStateEntity;
 import za.co.evilcorp.transact.infrastructure.persistence.entity.TransactionEntity;
@@ -31,7 +32,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -64,12 +64,14 @@ public class TransactionQueryService {
     public TransactionQueryService(
             TransactionRepository transactionRepository,
             SourceSyncStateRepository syncStateRepository,
-            @Value("${app.sources.ids:SOURCE_A,SOURCE_B,SOURCE_C}") List<String> configuredSourceIds,
+            SourceRegistryProperties sourceRegistry,
             @Value("${app.freshness.fresh-seconds:300}") long freshSeconds,
             @Value("${app.freshness.stale-seconds:1800}") long staleSeconds) {
         this.transactionRepository = transactionRepository;
         this.syncStateRepository = syncStateRepository;
-        this.configuredSourceIds = List.copyOf(new LinkedHashSet<>(configuredSourceIds));
+        // ALL registered sources (enabled or not): a disabled source must show up
+        // as UNKNOWN freshness / PARTIAL completeness, never be hidden (ADR-011).
+        this.configuredSourceIds = sourceRegistry.allIds();
         this.freshSeconds = freshSeconds;
         this.staleSeconds = staleSeconds;
     }

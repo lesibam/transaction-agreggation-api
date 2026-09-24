@@ -1,0 +1,4 @@
+[
+  {"id": "A100", "amount": -150, "currency": "ZAR", "description": "Grocery Store A", "merchantName": "Woolworths", "date": "2026-09-22T10:00:00Z"},
+  {"id": "A101", "amount": 2000, "currency": "ZAR", "description": "Salary Deposit", "merchantName": null, "date": "2026-09-21T09:00:00Z"}
+]

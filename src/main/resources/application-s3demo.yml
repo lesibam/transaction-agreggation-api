@@ -1,0 +1,55 @@
+# Profile `s3demo`: adds SOURCE_D, an S3 (MinIO) file-drop source, on top of the
+# three base MOCK sources.
+#
+# NOTE: Spring profile files REPLACE list properties (they do not merge), so
+# the full registry is re-declared here — SOURCE_A/B/C must match
+# application.yml exactly, or a base source silently disappears from BOTH the
+# ingestion pipeline and the freshness metadata. See ADR-011 and README
+# "Sources".
+#
+# Local demo (MinIO + the one-shot minio-seed job ship in docker-compose.yml):
+#   docker compose up -d
+#   docker compose stop transaction-api
+#   docker compose run -d --name transaction-api --service-ports \
+#     -e SPRING_PROFILES_ACTIVE=s3demo transaction-api
+#
+# Credentials are DEV-ONLY (minioadmin/minioadmin, matching docker-compose.yml).
+
+app:
+  sources:
+    registry:
+      - id: SOURCE_A
+        name: "Source A (bank feed)"
+        enabled: true
+        type: MOCK
+        normalizer: source-a-v1
+        mock:
+          data-location: classpath:mock/source-a.json
+      - id: SOURCE_B
+        name: "Source B (card processor)"
+        enabled: true
+        type: MOCK
+        normalizer: source-b-v1
+        mock:
+          data-location: classpath:mock/source-b.json
+      - id: SOURCE_C
+        name: "Source C (retail gateway)"
+        enabled: true
+        type: MOCK
+        normalizer: source-c-v1
+        mock:
+          data-location: classpath:mock/source-c.json
+      # Transport is decoupled from payload shape (ADR-011): SOURCE_D is an
+      # S3 file drop parsed with the Source C normalizer.
+      - id: SOURCE_D
+        name: "Source D (S3/MinIO file drop)"
+        enabled: true
+        type: S3
+        normalizer: source-c-v1
+        s3:
+          endpoint: http://minio:9000    # MinIO inside the compose network
+          region: us-east-1
+          bucket: transact-sources       # created + seeded by minio-seed
+          prefix: source-d/
+          access-key: minioadmin         # DEV-ONLY (docker-compose.yml)
+          secret-key: minioadmin

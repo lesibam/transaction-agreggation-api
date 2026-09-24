@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import za.co.evilcorp.transact.infrastructure.persistence.repository.SourceSyncStateRepository;
 import za.co.evilcorp.transact.support.AbstractIntegrationTest;
 
 import java.time.Duration;
@@ -13,10 +14,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end idempotency: two full ingestAllSources cycles over the same static
- * mock adapter data must not increase the transaction count — the UNIQUE
+ * End-to-end idempotency: a replayed ingestAllSources cycle (cursors rewound,
+ * simulating cursor loss / crash-before-commit under at-least-once delivery)
+ * must not increase the transaction count — the UNIQUE
  * (source_id, source_transaction_id) constraint plus listener duplicate
- * classification absorb the second cycle.
+ * classification absorb the replay.
  */
 class IdempotencyTest extends AbstractIntegrationTest {
 
@@ -27,6 +29,9 @@ class IdempotencyTest extends AbstractIntegrationTest {
 
     @Autowired
     private MeterRegistry meterRegistry;
+
+    @Autowired
+    private SourceSyncStateRepository syncStateRepository;
 
     private long demoTransactionCount() {
         return transactionRepository.findAll().stream()
@@ -52,6 +57,13 @@ class IdempotencyTest extends AbstractIntegrationTest {
         assertThat(countBefore).isEqualTo(EXPECTED_DEMO_TRANSACTIONS);
 
         double duplicatesBefore = duplicateCounterTotal();
+
+        // Rewind cursors to force a full replay of the same batch — the
+        // at-least-once scenario (fetch succeeded, cursor update lost).
+        syncStateRepository.findAll().forEach(state -> {
+            state.setCursor(null);
+            syncStateRepository.save(state);
+        });
 
         ingestionService.ingestAllSources();
 

@@ -22,6 +22,7 @@
         <!-- ShedLock 7.x is the line tested with Spring 7 / Spring Boot 4.x -->
         <shedlock.version>7.10.1</shedlock.version>
         <logstash-logback-encoder.version>8.0</logstash-logback-encoder.version>
+        <aws-sdk.version>2.55.4</aws-sdk.version>
         <!-- Embedded Tomcat override: 11.0.24 ships three CRITICAL
              authentication/authorization bypass CVEs (CVE-2026-65182,
              CVE-2026-65905, CVE-2026-68525), all fixed in 11.0.25.
@@ -37,6 +38,13 @@
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
                 <version>${testcontainers-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -123,6 +131,12 @@
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
 
+        <!-- S3 source adapter (AWS SDK v2; works against MinIO via endpoint override) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+
         <!-- Utilities -->
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -179,6 +193,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>minio</artifactId>
             <scope>test</scope>
         </dependency>
     
