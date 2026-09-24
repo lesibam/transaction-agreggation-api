@@ -14,7 +14,20 @@
  */
 import crypto from 'node:crypto';
 
-const secret = process.env.APP_SECURITY_JWT_SECRET
+const secretFromEnv = process.env.APP_SECURITY_JWT_SECRET;
+if (!secretFromEnv) {
+  // stderr only - stdout must stay just the token (callers capture it, e.g.
+  // TOKEN=$(node scripts/mint-jwt.mjs), and dev.sh/CI would otherwise mint a
+  // token signed with a secret that doesn't match a real running server).
+  console.error(
+    '[mint-jwt] WARNING: APP_SECURITY_JWT_SECRET not set - falling back to the ' +
+    'committed test-only secret. This only matches a server also using that ' +
+    'exact fallback (e.g. the Maven test suite). Against ./dev.sh start or any ' +
+    'real environment, this token will be rejected. Set APP_SECURITY_JWT_SECRET ' +
+    'to the value that server is actually using.'
+  );
+}
+const secret = secretFromEnv
   || 'test-only-not-a-real-secret-0123456789abcdef0123456789';
 const customerId = process.env.E2E_CUSTOMER_ID
   || '00000000-0000-0000-0000-000000000001';

@@ -62,7 +62,8 @@ graph TD
     - **Observability**: Micrometer metrics and the custom sync `HealthIndicator`.
 
 ### 2.5 Security Layer (`za.co.evilcorp.transact.security`)
-- JWT authentication filter, token provider, tenant context, and `CustomerAccessValidator` (path `customerId` must match JWT `sub` unless `ADMIN`).
+- JWT authentication filter, token provider, and `CustomerAccessValidator` (path `customerId` must match JWT `sub` unless `ADMIN`).
+- **Tenancy note**: tenancy is represented by `customers.tenant_id` (see `docs/02-domain-model.md`) but is not an independent authorization boundary today — isolation is enforced entirely by the `customerId` check above. An earlier `TenantContext` (a request-scoped holder for the JWT's `tenantId` claim) was removed 2026-09-25: it was write-only — populated by the JWT filter, read by nothing — which is a worse state than not having it, since it looks like an enforced control to anyone skimming the code. If cross-customer tenant-level scoping is needed later (e.g., one tenant operator managing several customers), it should be built as a real, tested authorization check, not resurrected as an unused holder. (See `docs/principal_engineer_review_report.md`, finding M-03.)
 
 ---
 

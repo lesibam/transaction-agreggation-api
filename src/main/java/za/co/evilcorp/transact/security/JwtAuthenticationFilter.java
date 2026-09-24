@@ -24,7 +24,6 @@ import java.util.UUID;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider tokenProvider;
-    private final TenantContext tenantContext;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -33,11 +32,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null && tokenProvider.validateToken(token)) {
             authenticate(token);
         }
-        try {
-            filterChain.doFilter(request, response);
-        } finally {
-            tenantContext.clear();
-        }
+        filterChain.doFilter(request, response);
     }
 
     private void authenticate(String token) {
@@ -48,8 +43,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 log.warn("Rejected JWT: missing subject claim");
                 return;
             }
-            UUID customerUuid = UUID.fromString(customerId);
-            String tenantId = claims.get("tenantId", String.class);
+            // Validated (not just parsed): a malformed subject fails fast here
+            // rather than reaching CustomerAccessValidator as an opaque string.
+            UUID.fromString(customerId);
             List<String> roles = readRoles(claims);
 
             List<SimpleGrantedAuthority> authorities = roles.stream()
@@ -59,11 +55,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(customerId, null, authorities);
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            tenantContext.setTenant(customerUuid, tenantId);
         } catch (JwtException | IllegalArgumentException e) {
             log.warn("Rejected JWT, continuing unauthenticated: {}", e.getMessage());
             SecurityContextHolder.clearContext();
-            tenantContext.clear();
         }
     }
 

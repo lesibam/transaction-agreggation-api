@@ -79,7 +79,7 @@ These are not compliments — each is verified against source or a running syste
 | H-03 | High | CI/Testing | No packaged-artifact verification in CI (compose smoke test); MockMvc slices don't cover the composed runtime | Open |
 | M-01 | Medium | Config hygiene | Dead/misleading Kafka consumer props in `application.yml` (incl. `spring.json.trusted.packages: "*"`) | Open |
 | M-02 | Medium | Consistency | Jackson 2 / Jackson 3 dual stack with two hand-built Jackson 2 mappers | Open |
-| M-03 | Medium | Security clarity | `TenantContext` is a write-only ThreadLocal; `tenantId` claim never used for scoping | Open |
+| M-03 | Medium | Security clarity | `TenantContext` is a write-only ThreadLocal; `tenantId` claim never used for scoping | **Fixed 2026-09-25** — deleted, see §5 |
 | M-04 | Medium | Fragility | `@Order(HIGHEST_PRECEDENCE)` coupling to Boot's ProblemDetailsExceptionHandler | Open (guarded by tests) |
 | M-05 | Medium | Contract | `openapi.yaml` hand-maintained; no automated contract verification | Open |
 | M-06 | Medium | Secrets | Helm chart materializes secrets from `.Values` into release metadata | Open |
@@ -193,6 +193,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 **Risk.** Two readings, both bad: (a) if multi-tenant isolation is *supposed* to be enforced at the data layer, it isn't — isolation is real but purely `customerId`-based (which is currently sufficient since `CustomerAccessValidator` binds `sub` to the path); (b) if tenant scoping is *not* intended, the class and the claim are dead code that misleads auditors into believing a tenant control exists.
 
 **Recommendation.** Decide. Either delete `TenantContext` (and document that tenancy is represented by `customers.tenant_id` and enforced at the customer-identity boundary), or make it real by adding `tenant_id` to the keyset/summary predicates. Given the guide's scope, deletion + documentation is the honest choice; note it in ADR-002.
+
+> **Fixed 2026-09-25.** `TenantContext.java` deleted; `JwtAuthenticationFilter` no longer references it (the `sub`-claim `UUID.fromString` validation it used to gate on is preserved as an explicit check). Documented in `docs/03-architecture.md` §2.5 rather than ADR-002 — the security layer's own architecture section, which already described `TenantContext`, was the section that would otherwise still be wrong, and is where the next reader actually looks.
 
 ---
 
