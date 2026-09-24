@@ -3,14 +3,20 @@ package za.co.evilcorp.transact.support;
 import java.lang.reflect.Field;
 import java.util.Map;
 
-final class DockerTestEnvironment {
+/**
+ * Test support for Rancher Desktop / unusual socket environments: pins the
+ * docker API version and disables Ryuk. Called by SharedContainers on static
+ * init, and by any test class that starts containers directly (without going
+ * through SharedContainers) so isolated runs work outside a full suite.
+ */
+public final class DockerTestEnvironment {
 
     private static boolean applied;
 
     private DockerTestEnvironment() {
     }
 
-    static synchronized void apply() {
+    public static synchronized void apply() {
         if (applied) {
             return;
         }

@@ -4,7 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MinIOContainer;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -23,11 +24,17 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration test against a per-class MinIO container. Batches use the
- * Source C payload shape while the descriptor id is SOURCE_S3, proving the
- * transport is decoupled from the payload shape via SourceCNormalizer.
+ * Integration test against a per-class MinIO container (same pinned Bitnami
+ * image the compose stack uses — the upstream minio/minio image no longer
+ * exists on Docker Hub). Batches use the Source C payload shape while the
+ * descriptor id is SOURCE_S3, proving the transport is decoupled from the
+ * payload shape via SourceCNormalizer.
  */
 class S3TransactionSourceTest {
+
+    private static final String MINIO_IMAGE = "bitnamilegacy/minio:2025.7.23-debian-12-r5";
+    private static final String MINIO_USER = "minioadmin";
+    private static final String MINIO_PASSWORD = "minioadmin";
 
     private static final String BATCH_001 =
         "[{\"tx_id\":\"D1\",\"tx_amount\":-5,\"tx_currency\":\"ZAR\",\"tx_desc\":\"x\","
@@ -36,23 +43,32 @@ class S3TransactionSourceTest {
         "[{\"tx_id\":\"D2\",\"tx_amount\":7,\"tx_currency\":\"ZAR\",\"tx_desc\":\"y\","
             + "\"merchantName\":\"Spotify\",\"tx_date\":\"2026-09-23T11:00:00Z\"}]";
 
-    private static MinIOContainer minio;
+    private static GenericContainer<?> minio;
+    private static String endpoint;
     private static S3Client adminClient;
     private static String bucket;
     private static S3TransactionSource source;
 
     @BeforeAll
     static void setUpSource() {
-        minio = new MinIOContainer(DockerImageName.parse("minio/minio:latest"));
+        // Rancher Desktop: pin docker API version before the docker client
+        // initializes (SharedContainers does this for suite tests; this class
+        // starts its container directly, so isolated runs need it too).
+        za.co.evilcorp.transact.support.DockerTestEnvironment.apply();
+        minio = new GenericContainer<>(DockerImageName.parse(MINIO_IMAGE))
+            .withEnv("MINIO_ROOT_USER", MINIO_USER)
+            .withEnv("MINIO_ROOT_PASSWORD", MINIO_PASSWORD)
+            .withExposedPorts(9000)
+            .waitingFor(Wait.forHttp("/minio/health/live").forPort(9000));
         minio.start();
-        String endpoint = minio.getS3URL();
+        endpoint = "http://" + minio.getHost() + ":" + minio.getMappedPort(9000);
 
         adminClient = S3Client.builder()
             .endpointOverride(URI.create(endpoint))
             .forcePathStyle(true)
             .region(Region.US_EAST_1)
             .credentialsProvider(StaticCredentialsProvider.create(
-                AwsBasicCredentials.create(minio.getUserName(), minio.getPassword())))
+                AwsBasicCredentials.create(MINIO_USER, MINIO_PASSWORD)))
             .build();
 
         bucket = "source-d-test-" + System.nanoTime();
@@ -117,8 +133,8 @@ class S3TransactionSourceTest {
 
         SourceDescriptor scalarDescriptor = new SourceDescriptor(
             "SOURCE_S3", null, true, SourceDescriptor.Type.S3, "source-c-v1", null, null,
-            new SourceDescriptor.S3(minio.getS3URL(), "us-east-1", bucket, "source-e/",
-                "minioadmin", "minioadmin", 10),
+            new SourceDescriptor.S3(endpoint, "us-east-1", bucket, "source-e/",
+                MINIO_USER, MINIO_PASSWORD, 10),
             null);
         S3TransactionSource scalarSource =
             new S3TransactionSource(scalarDescriptor, new SourceCNormalizer(), new ObjectMapper());
