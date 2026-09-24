@@ -14,6 +14,11 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
+# Upgrade OS packages to the latest security fixes available in the Alpine
+# repos — base image tags can lag behind published package patches (e.g.
+# libexpat CVE-2026-93990). The CI Trivy gate verifies the result.
+RUN apk upgrade --no-cache
+
 # Security: create a non-root user with a fixed numeric UID (required for runAsNonRoot in Kubernetes)
 RUN addgroup -S transactgroup && adduser -S -u 10001 transactuser -G transactgroup
 

@@ -10,6 +10,18 @@ import za.co.evilcorp.transact.infrastructure.persistence.repository.SourceSyncS
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Contributes per-source sync state to /actuator/health as DETAIL, without
+ * failing the overall health verdict.
+ *
+ * The health endpoint answers "is this instance ready to serve traffic?" —
+ * and this system is explicitly designed to serve (partial) results while a
+ * source is failing or starting up: INITIAL is a normal startup transient,
+ * not a failure, and a FAILED source must surface through freshness metadata,
+ * /v1/admin/sources, metrics and logs rather than 503-ing the API and
+ * pulling the instance from rotation. Database reachability still gates the
+ * overall health endpoint via Boot's own contributor.
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -25,18 +37,9 @@ public class SyncHealthIndicator implements HealthIndicator {
                 s -> s.getStatus()
             ));
 
-        boolean allSuccessful = sourceStatuses.values().stream().allMatch("SUCCESS"::equals);
-        
-        if (allSuccessful) {
-            return Health.up()
-                .withDetail("sources", sourceStatuses)
-                .withDetail("status", "All sources synced successfully")
-                .build();
-        }
-
-        return Health.down()
+        return Health.up()
             .withDetail("sources", sourceStatuses)
-            .withDetail("status", "One or more sources are failing sync")
+            .withDetail("allSuccessful", sourceStatuses.values().stream().allMatch("SUCCESS"::equals))
             .build();
     }
 }
