@@ -409,6 +409,33 @@ Per the Continuous Improvement Loop (`claude.md` §11, added 2026-09-24), the fo
 
 ---
 
+## 11. Remediation Session — 2026-09-25
+
+§10.2 predicted exactly this outcome: *"'Medium' becomes a polite synonym for 'never'... unless something forces it."* This session is that forcing function — every Medium/Low finding from §4 was worked through directly, not just re-logged.
+
+**Closed (10 of 10 findings addressed):**
+
+| ID | Outcome |
+|---|---|
+| M-01 | Fixed — and turned out worse than reported: not just two dead `properties.*` lines but the *entire* `spring.kafka.consumer`/`producer` block was dead. Removed. |
+| M-02 | Fixed — consolidated onto the one shared Jackson 2 bean; `docs/adr/011-jackson-2-in-boot-4.md` added. |
+| M-03 | Fixed — `TenantContext` deleted (not enforced), per the review's own recommended path. |
+| M-04 | Fixed — and turned out to be a different, more important bug than reported: not really an ordering fragility (the catch-all made `@Order`'s exact value moot), but three real exception types silently returning `500` instead of `405`/`415`/`404`. |
+| M-06 | Partially fixed — fail-fast Helm guard added; the real ExternalSecrets/KMS migration stays open (genuine infra work). |
+| M-07 | Fixed — verified safe first (no entity has a JPA association for OSIV to matter to). |
+| L-01 | Fixed — `V3__transactions_direction_check.sql`. |
+| L-03 | Fixed — stderr warning on secret fallback. |
+| L-04 | Fixed — `debitCount`/`creditCount` threaded through the full stack instead of discarded at the JDBC projection boundary. |
+| L-05 | Fixed — correlation ID echoed on every response. |
+
+**Still open, unchanged, and correctly so:** L-02 (mock adapters ignore cursor — by design), L-06/L-07/L-08 (documented/acceptable for a demo topology). All of Phase 9 ("Bank Production Readiness") remains open — none of today's fixes were an attempt at that bar, and `IMPLEMENTATION_PLAN.md` was updated where a Phase 9 line referenced a now-partially-stale finding (M-03, M-06).
+
+**Pattern worth naming, since it happened twice in one session:** two of these findings (M-01, M-04) were *understated* by the original review — the actual root cause, once traced fully, was bigger than what got written down. Both times, fixing the finding as literally described would have been a smaller, less valuable fix than what the code actually needed. Worth remembering for future review rounds: a finding's initial framing is a starting point for investigation, not a fixed scope for the fix.
+
+**What's genuinely verified vs. not.** `mvn compile`/`test-compile` ran clean after every change; the 53-test Docker-free subset (`./dev.sh test --unit`) passed after every batch. Nothing requiring Testcontainers or a live Postgres/Kafka (the new migration, the new/changed integration tests, the summary API's new fields end-to-end) has run live — no Docker daemon was available in this session, same limitation as §10.5. The Helm change is additionally unverified against `helm template`/`helm lint` — no `helm` binary was reachable (egress to `get.helm.sh` and `github.com/helm/helm/releases` both blocked by proxy policy). **A reviewer with Docker and Helm should run the full suite and `helm lint` before treating this session's changes as done, not just committed.**
+
+---
+
 ## Appendix A — Verification Evidence Log (2026-09-23)
 
 | # | Command / Probe | Result |
