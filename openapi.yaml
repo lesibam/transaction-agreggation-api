@@ -426,7 +426,7 @@ components:
 
     CurrencySummary:
       type: object
-      required: [currency, totalDebit, totalCredit, netFlow]
+      required: [currency, totalDebit, totalCredit, netFlow, debitCount, creditCount]
       properties:
         currency:
           type: string
@@ -443,6 +443,16 @@ components:
           type: number
           description: totalCredit - totalDebit for this currency only.
           example: 7000.00
+        debitCount:
+          type: integer
+          format: int64
+          description: Number of DEBIT transactions summed into totalDebit for this currency.
+          example: 42
+        creditCount:
+          type: integer
+          format: int64
+          description: Number of CREDIT transactions summed into totalCredit for this currency.
+          example: 7
 
     CategorySummary:
       type: object

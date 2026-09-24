@@ -84,10 +84,10 @@ These are not compliments — each is verified against source or a running syste
 | M-05 | Medium | Contract | `openapi.yaml` hand-maintained; no automated contract verification | Open |
 | M-06 | Medium | Secrets | Helm chart materializes secrets from `.Values` into release metadata | Open |
 | M-07 | Medium | Config | `spring.jpa.open-in-view` left default (WARN on every boot) | Open |
-| L-01 | Low | Data | No `CHECK` constraint on `transactions.direction` (`DEBIT`/`CREDIT`) | Open |
+| L-01 | Low | Data | No `CHECK` constraint on `transactions.direction` (`DEBIT`/`CREDIT`) | **Fixed 2026-09-25** — see §5 |
 | L-02 | Low | Ingestion | Mock adapters ignore the cursor for data generation → duplicate publishes every cycle | By design (mock), note |
 | L-03 | Low | Tooling | `mint-jwt.mjs` silently falls back to the committed test secret | Open |
-| L-04 | Low | Persistence | Summary SQL computes `debitCount`/`creditCount` that the mapping discards | Open (nit) |
+| L-04 | Low | Persistence | Summary SQL computes `debitCount`/`creditCount` that the mapping discards | **Fixed 2026-09-25** — see §5 |
 | L-05 | Low | Observability | `CorrelationIdFilter` never echoes the correlation id in the response | Open |
 | L-06 | Low | Infra | Kafka external listener advertises `localhost:9092` while e2e override maps host `9093` | Documented in override |
 | L-07 | Low | Infra | Compose Grafana default `admin/admin` | Acceptable (dev-only) |
@@ -235,6 +235,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 ### L-01 — No `CHECK` on `transactions.direction`
 V1 declares `direction VARCHAR(10)` with a comment — not a constraint (`-- 'DEBIT' or 'CREDIT'`). V2 added a status CHECK to `source_sync_state` but not to `transactions`. The enum mapping makes bad values unlikely, but invariants belong in the database per the DBA rules. Add `CHECK (direction IN ('DEBIT','CREDIT'))` in the next migration.
 
+> **Fixed 2026-09-25.** `V3__transactions_direction_check.sql` adds `CHECK (direction IN ('DEBIT', 'CREDIT'))`, matching V2's `source_sync_state.status` pattern exactly. `hibernate.ddl-auto: validate` doesn't validate CHECK constraints (no `@Check` mapping exists in the entity), so this can't cause a startup validation failure. Not yet run against a live Postgres in this environment (no Docker) — the SQL is a direct copy of an already-proven pattern, but a reviewer with Docker should still run `./dev.sh start` once and confirm Flyway applies it cleanly.
+
 ### L-02 — Mock adapters ignore the cursor
 `SourceAAdapter.simulateApiCall` (lines 60-78) returns the same records regardless of cursor, so every 60 s cycle re-publishes known records and relies on idempotency to skip them. Correct and self-proving — but it also means the live system emits a stream of duplicate-key WARNs forever (observed in container logs). For demo realism and log hygiene, make adapters return an empty page when the cursor indicates "already seen", or lower the Hibernate WARN for constraint 23505. Document whichever is chosen.
 
@@ -243,6 +245,8 @@ V1 declares `direction VARCHAR(10)` with a comment — not a constraint (`-- 'DE
 
 ### L-04 — Dead aggregate columns
 `TransactionRepository.java:77-78` computes `debitCount`/`creditCount`; `TransactionQueryService.toCurrencyTotals` (150-154) drops them. Either surface them in `SummaryDto` (cheap, and counts are genuinely useful) or remove from the SQL.
+
+> **Fixed 2026-09-25.** Surfaced, not removed. Threaded through the whole chain: `CurrencySummaryRow` gained `getDebitCount()`/`getCreditCount()` (the SQL columns existed but nothing bound to them — Spring Data's native-query projection matches columns to interface getters by name, so a missing getter silently drops the column at the JDBC boundary, before it ever reaches Java), `CurrencyTotals` and `SummaryDto.CurrencySummary` gained matching fields, `openapi.yaml` documents them. Test coverage added in `ApiSummaryCurrencyTest.returnsSeparateTotalsPerCurrency`. Verified: `mvn test-compile` clean across the full chain; `./dev.sh test --unit` still green. The new assertions themselves need Testcontainers to actually run (no Docker in this environment) — a reviewer with Docker should confirm the test passes, not just compiles.
 
 ### L-05 — Correlation id is not echoed to clients
 `CorrelationIdFilter.java:28-33` sets the MDC only. During the §6 incident, the response header `X-Correlation-Id` I observed actually came from the *impostor* application — our app does not echo one. Add `((HttpServletResponse) response).setHeader(CORRELATION_ID_HEADER, correlationId)` so clients can quote the trace id in support tickets (the ProblemDetail `traceId` extension covers errors; normal 200s currently carry no correlation).

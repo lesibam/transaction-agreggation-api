@@ -86,7 +86,7 @@ Aggregates are computed in SQL (`SUM` grouped by currency / category) — no in-
 ```json
 {
   "summaries": [
-    { "currency": "ZAR", "totalDebit": 5000.00, "totalCredit": 12000.00, "netFlow": 7000.00 }
+    { "currency": "ZAR", "totalDebit": 5000.00, "totalCredit": 12000.00, "netFlow": 7000.00, "debitCount": 42, "creditCount": 7 }
   ],
   "categoryBreakdown": [
     { "category": "FOOD_AND_DINING", "amount": 1200.00, "currency": "ZAR", "transactionCount": 3 }

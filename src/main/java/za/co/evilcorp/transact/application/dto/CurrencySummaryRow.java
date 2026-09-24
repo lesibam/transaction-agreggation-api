@@ -9,4 +9,8 @@ public interface CurrencySummaryRow {
     BigDecimal getTotalDebit();
 
     BigDecimal getTotalCredit();
+
+    Long getDebitCount();
+
+    Long getCreditCount();
 }

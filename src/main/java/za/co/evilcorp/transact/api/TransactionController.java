@@ -79,7 +79,8 @@ public class TransactionController {
         return new SummaryDto(
                 result.summaries().stream()
                         .map(s -> new SummaryDto.CurrencySummary(
-                                s.currency(), s.totalDebit(), s.totalCredit(), s.netFlow()))
+                                s.currency(), s.totalDebit(), s.totalCredit(), s.netFlow(),
+                                s.debitCount(), s.creditCount()))
                         .toList(),
                 result.categoryBreakdown().stream()
                         .map(c -> new SummaryDto.CategorySummary(

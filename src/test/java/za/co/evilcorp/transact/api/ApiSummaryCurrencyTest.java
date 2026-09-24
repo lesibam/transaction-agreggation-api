@@ -74,11 +74,15 @@ class ApiSummaryCurrencyTest extends AbstractIntegrationTest {
         assertThat(zar.get("totalDebit").decimalValue()).isEqualByComparingTo("150.00");
         assertThat(zar.get("totalCredit").decimalValue()).isEqualByComparingTo("200.00");
         assertThat(zar.get("netFlow").decimalValue()).isEqualByComparingTo("50.00");
+        assertThat(zar.get("debitCount").asLong()).isEqualTo(2);
+        assertThat(zar.get("creditCount").asLong()).isEqualTo(1);
 
         JsonNode usd = summaryFor("USD");
         assertThat(usd.get("totalDebit").decimalValue()).isEqualByComparingTo("10.00");
         assertThat(usd.get("totalCredit").decimalValue()).isEqualByComparingTo("5.00");
         assertThat(usd.get("netFlow").decimalValue()).isEqualByComparingTo("-5.00");
+        assertThat(usd.get("debitCount").asLong()).isEqualTo(1);
+        assertThat(usd.get("creditCount").asLong()).isEqualTo(1);
     }
 
     @Test

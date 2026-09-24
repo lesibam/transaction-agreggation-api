@@ -180,7 +180,7 @@ Machine-readable contract: [`openapi.yaml`](openapi.yaml). Human-readable contra
 | Method | Path | Auth | Purpose |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/v1/customers/{customerId}/transactions` | `CUSTOMER` (own id) or `ADMIN` | Keyset-paginated canonical transactions (`cursor`, `limit` 1–100, `category`, `direction`, `startDate`, `endDate`, `minAmount`, `maxAmount`) with `freshness` + `completeness` metadata |
-| `GET` | `/v1/customers/{customerId}/summary` | `CUSTOMER` (own id) or `ADMIN` | SQL aggregates per currency (`totalDebit`, `totalCredit`, `netFlow`) plus category breakdown; no FX conversion |
+| `GET` | `/v1/customers/{customerId}/summary` | `CUSTOMER` (own id) or `ADMIN` | SQL aggregates per currency (`totalDebit`, `totalCredit`, `netFlow`, `debitCount`, `creditCount`) plus category breakdown; no FX conversion |
 | `GET` | `/v1/admin/sources` | `ADMIN` | Per-source sync status from `source_sync_state` (`id`, `name`, `status`, `lastSuccessfulSync`, `lastAttempt`, `failureCount`, `freshnessSeconds`, `freshnessStatus`) |
 | `GET` | `/actuator/health` | open | Liveness/readiness + per-source sync detail |
 | `GET` | `/actuator/prometheus` | open (internal scrape) | Micrometer metrics scrape endpoint (`/actuator/health*`, `/actuator/info`, and `/actuator/prometheus` are unauthenticated for the compose Prometheus; the rest of `/actuator/**` requires a token) |
