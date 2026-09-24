@@ -78,7 +78,7 @@ These are not compliments — each is verified against source or a running syste
 | H-02 | High | CI/Security | Trivy scan is non-blocking (`continue-on-error`) — violates security standards | Open |
 | H-03 | High | CI/Testing | No packaged-artifact verification in CI (compose smoke test); MockMvc slices don't cover the composed runtime | Open |
 | M-01 | Medium | Config hygiene | Dead/misleading Kafka consumer props in `application.yml` (incl. `spring.json.trusted.packages: "*"`) | Open |
-| M-02 | Medium | Consistency | Jackson 2 / Jackson 3 dual stack with two hand-built Jackson 2 mappers | Open |
+| M-02 | Medium | Consistency | Jackson 2 / Jackson 3 dual stack with two hand-built Jackson 2 mappers | **Fixed 2026-09-25** — see §5 |
 | M-03 | Medium | Security clarity | `TenantContext` is a write-only ThreadLocal; `tenantId` claim never used for scoping | **Fixed 2026-09-25** — deleted, see §5 |
 | M-04 | Medium | Fragility | `@Order(HIGHEST_PRECEDENCE)` coupling to Boot's ProblemDetailsExceptionHandler | Open (guarded by tests) |
 | M-05 | Medium | Contract | `openapi.yaml` hand-maintained; no automated contract verification | Open |
@@ -183,6 +183,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 **Risk.** Serialization drift between the Kafka path, the error-writer path, and the HTTP DTO path (three different mappers with three different `java.time` behaviors). Today all observable paths are correct (API tests + E2E assert ISO-8601 shapes), so this is consistency debt, not a bug.
 
 **Recommendation.** Consolidate: inject the shared Jackson 2 `ObjectMapper` bean into `KafkaProducerConfig` instead of building a second one; add a one-line ADR note documenting *why* Jackson 2 exists in a Boot 4 app (the comment in `Jackson2Config` is good — promote it to ADR-011 so the next engineer doesn't "clean it up").
+
+> **Fixed 2026-09-25.** `KafkaProducerConfig.transactionEventProducerFactory` now takes `ObjectMapper objectMapper` as a parameter instead of building `new ObjectMapper()` + `registerModule(new JavaTimeModule())` inline — it's the same `Jackson2Config.jackson2ObjectMapper()` bean `SecurityConfig` and `KafkaConsumerConfig` already used, autowired by type (safe because Jackson 3 lives under a different package, `tools.jackson.*`, so there's exactly one bean of Jackson 2's `ObjectMapper` type in the context — no `@Qualifier` needed). `docs/adr/011-jackson-2-in-boot-4.md` written as recommended. Verified: `mvn compile` clean.
 
 ---
 
