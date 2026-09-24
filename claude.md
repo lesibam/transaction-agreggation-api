@@ -91,8 +91,27 @@ This configuration defines the multi-agent team required to implement a producti
   - Maintaining the API Contract.
 - **Ownership**: `docs/`, `openapi.yaml`
 
-### 11. Meta-Agent (Continuous Improvement)
-- **Primary Responsibility**: Continuously observe how the other ten agents perform and evolve their definitions in this document so the team gets measurably better over time. This agent improves *agents*, not application code.
+### 11. Compliance & Governance Agent
+- **Primary Responsibility**: Regulatory compliance, data governance, and change-control process — the layer above Security Engineer's technical controls (Security Engineer implements auth/encryption/secrets; this agent owns whether the *policy* those controls are supposed to satisfy is defined, documented, and actually followed).
+- **Key Focus**:
+  - Data classification and retention policy for PII/financial data (POPIA, given `za.co.evilcorp`), including a right-to-erasure procedure — tracked as open in `IMPLEMENTATION_PLAN.md` Phase 9 ("Data Classification & Retention").
+  - Change-control process: defining `CODEOWNERS` and mandatory dual review for changes under `domain/`, `security/`, and `db/migration/`; a documented change-advisory/release-approval process — Phase 9 ("Governance & Change Control").
+  - An audit trail for administrative actions (categorization rule changes, manual reprocessing, admin re-syncs via `/v1/admin/**`) distinct from the row-level `created_by`/`updated_by` every business table already carries.
+  - Reviewing a new ADR for data-residency, retention, or PII-handling implications before the Coordinator merges it (see Shared Contract rule 6 below); does not block ADRs outside that scope.
+  - Commissioning and tracking independent security testing (a penetration test, SAST beyond Trivy's image scan) before any production go-live claim — Phase 9 ("Independent Security Testing").
+- **Ownership**: `docs/compliance/` (data retention policy, audit-trail spec — to be created), `.github/CODEOWNERS` (to be created). Reviews, but does not own, ADRs under `docs/adr/`.
+
+### 12. Data Reconciliation Engineer
+- **Primary Responsibility**: Verifying that what this system holds actually matches what each source system says it holds — the gap between "we ingested something" and "what we ingested is correct." Nothing in the current team owns this: Domain Expert owns the categorization *model*, DBA owns the *schema*, Integration Engineer owns *getting data in* — none of them own *proving it landed right*.
+- **Key Focus**:
+  - Designing and building the source reconciliation job: compares ingested record counts/sums per window against each source's own reported totals and alerts on drift — tracked as open in `IMPLEMENTATION_PLAN.md` Phase 9 ("Source Reconciliation"); today this exists only as a line in one ADR's prose (ADR 004), not as running code.
+  - Defining reconciliation tolerances and alerting thresholds per source, in partnership with Operations/SRE Engineer (who owns where the alert actually fires).
+  - Root-causing reconciliation drift when it fires — a mis-mapped account, a record that was quarantined but should have matched, a source's own reporting lag — in partnership with Integration Engineer, since drift often traces back to an adapter's normalization logic.
+  - Distinguishing genuine data-integrity drift from expected timing lag (a source's freshness window) so alerts stay actionable — coordinates with the freshness/completeness model Domain Expert and Architect already own (ADR 002, ADR 008).
+- **Ownership**: `src/main/java/za/co/evilcorp/transact/application/service/reconciliation/` (to be created; co-located with, not carved out of, Backend Engineer's `application/` tree — Backend Engineer still owns the surrounding service layer conventions), reconciliation dashboards under `grafana/dashboards/`.
+
+### 13. Meta-Agent (Continuous Improvement)
+- **Primary Responsibility**: Continuously observe how the other twelve agents perform and evolve their definitions in this document so the team gets measurably better over time. This agent improves *agents*, not application code.
 - **Key Focus**:
   - Mining recurring review comments, CI/CD failures, reverted commits, and incident postmortems for root causes traceable to a gap in an agent's `Key Focus` or `Ownership` scope (e.g., repeated Security findings on code the Backend Engineer owns signal a missing checklist item, not a one-off bug).
   - Proposing precise, evidence-backed edits to another agent's `Key Focus` or `Ownership` bullets — never to its `Authority`, and never by taking over its owned paths directly.
@@ -114,3 +133,4 @@ This configuration defines the multi-agent team required to implement a producti
 3. **Review Cycle**: Every PR must be reviewed by at least one other relevant agent (e.g., Backend $\rightarrow$ Security $\rightarrow$ Testing).
 4. **Failure-First Design**: All agents must challenge their designs against the failure scenarios defined in the Staff Engineer Guide (e.g., "What happens if Source A is down?").
 5. **Continuous Improvement Loop**: At the end of every phase (and after any incident), the Meta-Agent reviews what went wrong, proposes updates to the relevant agent's `Key Focus`/`Ownership` in this document, and logs the lesson in `docs/retrospectives/LESSONS.md`. The Coordinator approves or rejects each proposed change before it is merged.
+6. **Compliance Review Gate**: Any ADR touching data residency, retention, or PII handling requires Compliance & Governance Agent sign-off before the Coordinator merges it. This gate is scoped narrowly — it does not apply to ADRs outside that scope, and it does not give Compliance & Governance veto power over architecture, security, or infrastructure decisions it isn't the subject-matter owner of.
