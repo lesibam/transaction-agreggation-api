@@ -17,6 +17,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Scaling strategies and Infrastructure-as-Code (Terraform/Helm).
   - Authoring and reviewing Architecture Decision Records (ADRs).
   - Before introducing new infrastructure (a deployment target, datastore, or broker), cross-checking it against the requirements guide's "What Not to Build" list and writing the justifying ADR when a listed item is genuinely needed (see `docs/retrospectives/LESSONS.md`, 2026-09-24).
+  - Distributed tracing strategy and the backend-choice ADR it requires (a tracing backend is exactly the "What Not to Build" case above) — see `docs/otel-tracing-handoff.md`, coordinating Backend Engineer (HTTP-side, largely free) and Integration Engineer (Kafka-side span propagation, the harder half).
 - **Ownership**: `docs/adr/`, `infrastructure/`
 
 ### 3. Domain Expert
@@ -44,7 +45,8 @@ This configuration defines the multi-agent team required to implement a producti
   - Kafka producer/consumer implementation and partition strategies.
   - Resilience patterns: Timeouts, Retries, and Bulkheads.
   - Messaging port abstraction to avoid broker lock-in.
-- **Ownership**: `src/main/java/za/co/evilcorp/transact/infrastructure/integration/`
+  - Enabling Kafka's built-in Observation support (`setObservationEnabled`) on the hand-built `KafkaTemplate`/listener container factory once distributed tracing is picked up — see `docs/otel-tracing-handoff.md` §3.
+- **Ownership**: `src/main/java/za/co/evilcorp/transact/infrastructure/integration/`, `src/main/java/za/co/evilcorp/transact/infrastructure/messaging/`, `src/main/java/za/co/evilcorp/transact/config/KafkaProducerConfig.java`. *(Ownership path corrected 2026-09-25: `KafkaConsumerConfig`/`KafkaProducerConfig` are the Kafka wiring this Key Focus already names, but previously sat outside the listed path entirely — drift the Meta-Agent's own remit exists to catch.)*
 
 ### 6. Security Engineer
 - **Primary Responsibility**: System hardening and identity management.

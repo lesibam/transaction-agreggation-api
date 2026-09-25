@@ -13,7 +13,9 @@ import java.util.concurrent.TimeUnit;
  * Kafka implementation of the application-owned messaging port.
  * Keyed by source so records for one source stay ordered on a single partition.
  * Producer serializers (StringSerializer key / JsonSerializer value) come from
- * spring.kafka.producer.* configuration — not set here.
+ * {@link za.co.evilcorp.transact.config.KafkaProducerConfig}, built explicitly
+ * there — not from spring.kafka.producer.* configuration, which this app
+ * doesn't read (see application.yml's comment on spring.kafka, M-01).
  */
 @Slf4j
 @Component
