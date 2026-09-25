@@ -1,4 +1,4 @@
-# ADR 011: Why Jackson 2 Still Exists in a Boot 4 App
+# ADR 012: Why Jackson 2 Still Exists in a Boot 4 App
 
 ## Status
 Accepted

@@ -33,7 +33,7 @@ public class KafkaProducerConfig {
         // Shared Jackson2Config bean (java.time support) - the same instance
         // KafkaConsumerConfig and SecurityConfig use, so all three Jackson 2
         // call sites in this Boot-4-with-Jackson-3-by-default app agree on one
-        // configuration instead of drifting independently. See ADR-011.
+        // configuration instead of drifting independently. See ADR-012.
         JsonSerializer<TransactionIngestedEvent> valueSerializer = new JsonSerializer<>(objectMapper);
         valueSerializer.setAddTypeInfo(false);
 

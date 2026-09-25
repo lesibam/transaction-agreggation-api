@@ -1,4 +1,4 @@
--- V3: invariant enforcement per shared contract (forward-only; V1/V2 immutable)
+-- V4: invariant enforcement per shared contract (forward-only; V1-V3 immutable)
 --
 -- transactions.direction was declared VARCHAR(10) with a comment only
 -- ('DEBIT' or 'CREDIT') - not a database-level constraint. The application
