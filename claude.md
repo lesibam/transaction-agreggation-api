@@ -18,7 +18,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Authoring and reviewing Architecture Decision Records (ADRs).
   - Before introducing new infrastructure (a deployment target, datastore, or broker), cross-checking it against the requirements guide's "What Not to Build" list and writing the justifying ADR when a listed item is genuinely needed (see `docs/retrospectives/LESSONS.md`, 2026-09-24).
   - Distributed tracing strategy and the backend-choice ADR it requires (a tracing backend is exactly the "What Not to Build" case above) — see `docs/otel-tracing-handoff.md`, coordinating Backend Engineer (HTTP-side, largely free) and Integration Engineer (Kafka-side span propagation, the harder half).
-- **Ownership**: `docs/adr/`, `infrastructure/`
+- **Ownership**: `docs/adr/`. *(Terraform/IaC, if introduced, is Architect's too — not built today, tracked as Future Evolution in `README.md`. The bare `infrastructure/` this line previously listed didn't correspond to any real path and collided with the Java `infrastructure/` package other agents already own pieces of — e.g. Integration Engineer's `infrastructure/integration/`, `infrastructure/messaging/` below; corrected 2026-09-25, see `docs/retrospectives/LESSONS.md`.)*
 
 ### 3. Domain Expert
 - **Primary Responsibility**: Domain modeling and business logic correctness.
@@ -41,12 +41,12 @@ This configuration defines the multi-agent team required to implement a producti
 ### 5. Integration Engineer
 - **Primary Responsibility**: External connectivity and messaging.
 - **Key Focus**:
-  - Source Adapter architecture (Normalization).
+  - Source registry architecture (`app.sources.registry`, ADR-011): transport adapters (`MOCK`/`KAFKA`/`S3`/`HTTP`) plus the `SourceNormalizer` strategy each registry entry selects.
   - Kafka producer/consumer implementation and partition strategies.
   - Resilience patterns: Timeouts, Retries, and Bulkheads.
   - Messaging port abstraction to avoid broker lock-in.
   - Enabling Kafka's built-in Observation support (`setObservationEnabled`) on the hand-built `KafkaTemplate`/listener container factory once distributed tracing is picked up — see `docs/otel-tracing-handoff.md` §3.
-- **Ownership**: `src/main/java/za/co/evilcorp/transact/infrastructure/integration/`, `src/main/java/za/co/evilcorp/transact/infrastructure/messaging/`, `src/main/java/za/co/evilcorp/transact/config/KafkaProducerConfig.java`. *(Ownership path corrected 2026-09-25: `KafkaConsumerConfig`/`KafkaProducerConfig` are the Kafka wiring this Key Focus already names, but previously sat outside the listed path entirely — drift the Meta-Agent's own remit exists to catch.)*
+- **Ownership**: `src/main/java/za/co/evilcorp/transact/infrastructure/integration/`, `src/main/java/za/co/evilcorp/transact/infrastructure/messaging/`, `src/main/java/za/co/evilcorp/transact/config/KafkaProducerConfig.java`, `src/main/java/za/co/evilcorp/transact/config/SourceDescriptor.java`, `src/main/java/za/co/evilcorp/transact/config/SourceRegistryProperties.java`. *(Ownership path corrected 2026-09-25: `KafkaConsumerConfig`/`KafkaProducerConfig` are the Kafka wiring this Key Focus already names, but previously sat outside the listed path entirely. Corrected again the same day to add the two registry-binding classes ADR-011 introduced on `main` outside any agent session — drift the Meta-Agent's own remit exists to catch; see `docs/retrospectives/LESSONS.md`.)*
 
 ### 6. Security Engineer
 - **Primary Responsibility**: System hardening and identity management.
@@ -73,7 +73,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Testcontainers for realistic infrastructure testing.
   - E2E workflows via Playwright.
   - Performance and load testing via K6 — reporting format, scoping gaps, and the handoff to Operations/SRE Engineer for capacity/alerting decisions built on the results are in `docs/load-testing-handoff.md`.
-- **Ownership**: `src/test/`, `tests/e2e/`, `scripts/load-test.js`, `docs/load-test-results/` (dated result reports, once they exist)
+- **Ownership**: `src/test/`, `tests/e2e/`, `scripts/load-test.js`, `scripts/mint-jwt.mjs`, `scripts/e2e-assert.mjs`, `scripts/test.sh`, `docs/load-test-results/` (dated result reports, once they exist)
 
 ### 9. Operations/SRE Engineer
 - **Primary Responsibility**: Observability, Deployment, and Reliability.
@@ -84,7 +84,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Disaster Recovery: Backup and Recovery verification (RPO/RTO).
   - Alerting: owns where an alert actually fires (Alertmanager/Grafana alerting config, routing, on-call posture) once the SLI-owning agent defines what/threshold — see `docs/handoffs-index.md` for all five handoffs; the Alertmanager-vs-Grafana-unified-alerting routing decision is raised once (`docs/reconciliation-alerting-handoff.md` §5) and reused by every other handoff that needs it.
   - Executing recovery drills against `docs/recovery-plan.md` — post-restore verification specifics (which constraints to re-check, the Flyway-migration-replay scenario) are DBA's and Data Reconciliation Engineer's input, handed off in `docs/recovery-drill-handoff.md`; SRE still owns the runbook itself and the actual restore mechanics.
-- **Ownership**: `Dockerfile`, `docker-compose.yml`, `helm/`, `prometheus/`, `grafana/`
+- **Ownership**: `Dockerfile`, `docker-compose.yml`, `dev.sh`, `mock-s3/` (S3 demo seed data, uploaded by `docker-compose.yml`'s `minio-seed` service), `helm/`, `prometheus/`, `grafana/`
 
 ### 10. Documentation Engineer
 - **Primary Responsibility**: Technical communication and specifications.
