@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-The system ingests from three independent sources on a schedule. Any source can be slow, down, or returning garbage at any moment. A read API that blocks on all sources fails open availability; an API that returns whatever is in the database without qualification lies about completeness. Consumers making financial decisions need to know *both* what data exists and how much to trust it — without the API inventing certainty.
+The system ingests from multiple independent sources on a schedule — three by default (`SOURCE_A`/`SOURCE_B`/`SOURCE_C`), with the actual set config-driven per environment since ADR-011. Any source can be slow, down, or returning garbage at any moment. A read API that blocks on all sources fails open availability; an API that returns whatever is in the database without qualification lies about completeness. Consumers making financial decisions need to know *both* what data exists and how much to trust it — without the API inventing certainty.
 
 ## Decision
 Reads are always served from the local store (eventual consistency, ADR 002), and **every list/summary response carries explicit trust metadata**:
