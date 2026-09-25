@@ -351,8 +351,12 @@ components:
           properties:
             provider:
               type: string
-              description: Source system identifier (source_id).
-              enum: [SOURCE_A, SOURCE_B, SOURCE_C]
+              description: |
+                Source system identifier (source_id) — one of the `id` values in
+                app.sources.registry (ADR-011). Not a fixed enum: the registry is
+                config-driven, so the set of valid values is deployment-specific
+                (the committed default registry ships SOURCE_A/SOURCE_B/SOURCE_C).
+              example: SOURCE_A
             transactionId:
               type: string
               description: Source-scoped transaction ID; unique only within that source.
