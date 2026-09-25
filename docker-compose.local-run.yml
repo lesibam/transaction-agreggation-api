@@ -1,0 +1,28 @@
+# Optional overlay: exposes Postgres's port to the host so the Spring Boot
+# app can be run directly (`mvn spring-boot:run` or `java -jar`) against the
+# compose-managed Postgres/Kafka, instead of running inside its own
+# container. Useful when you want a fast local dev loop (no image rebuild
+# per change) or the app's own Dockerfile build is unavailable in your
+# environment (e.g. a sandboxed network that can't reach the base image's
+# package repositories during `docker build`).
+#
+# Kafka needs no equivalent change: docker-compose.yml already publishes
+# its EXTERNAL listener to localhost:9092 for exactly this kind of
+# host-side access (see the comment there).
+#
+# Usage:
+#   ./dev.sh start --local-run
+#   # then, in another shell:
+#   mvn -DskipTests package
+#   SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/transact \
+#   SPRING_DATASOURCE_USERNAME=app \
+#   SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+#     java -jar target/transact-*.jar
+#
+# (Not used by `./dev.sh start`'s default path, and not exercised by CI —
+# CI runs the app in its own container like the default `start` does.)
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
