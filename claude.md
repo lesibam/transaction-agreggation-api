@@ -70,8 +70,8 @@ This configuration defines the multi-agent team required to implement a producti
   - Unit tests for services and Integration tests for repositories.
   - Testcontainers for realistic infrastructure testing.
   - E2E workflows via Playwright.
-  - Performance and load testing via K6.
-- **Ownership**: `src/test/`, `tests/e2e/`, `scripts/load-test.js`
+  - Performance and load testing via K6 — reporting format, scoping gaps, and the handoff to Operations/SRE Engineer for capacity/alerting decisions built on the results are in `docs/load-testing-handoff.md`.
+- **Ownership**: `src/test/`, `tests/e2e/`, `scripts/load-test.js`, `docs/load-test-results/` (dated result reports, once they exist)
 
 ### 9. Operations/SRE Engineer
 - **Primary Responsibility**: Observability, Deployment, and Reliability.
