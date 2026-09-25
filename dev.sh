@@ -20,6 +20,7 @@ ENV_FILE="$ROOT/.env"
 CERT_DIR="$ROOT/certs"
 COMPOSE_BASE=(-f docker-compose.yml)
 COMPOSE_TLS=(-f docker-compose.yml -f docker-compose.tls.yml)
+COMPOSE_LOCAL_RUN=(-f docker-compose.yml -f docker-compose.local-run.yml)
 DEFAULT_CUSTOMER_ID="00000000-0000-0000-0000-000000000001"
 
 # ---------------------------------------------------------------------------
@@ -85,13 +86,22 @@ load_env() {
   set +a
 }
 
-# Populates the global COMPOSE_FILES array and BASE_URL for the given TLS flag.
+# Populates the global COMPOSE_FILES array and BASE_URL for the given TLS
+# flag and (optionally) local-run flag. tls and local_run are mutually
+# exclusive (--local-run skips the app container entirely, so there is no
+# app-side listener for --tls to configure); callers that accept both
+# options must reject the combination before calling this.
 compose_context() {
   local tls="$1"
+  local local_run="${2:-0}"
   if [[ "$tls" == "1" ]]; then
     COMPOSE_FILES=("${COMPOSE_TLS[@]}")
     BASE_URL="https://localhost:8443"
     CURL_TLS_FLAG="-k"
+  elif [[ "$local_run" == "1" ]]; then
+    COMPOSE_FILES=("${COMPOSE_LOCAL_RUN[@]}")
+    BASE_URL="http://localhost:8080"
+    CURL_TLS_FLAG=""
   else
     COMPOSE_FILES=("${COMPOSE_BASE[@]}")
     BASE_URL="http://localhost:8080"
@@ -142,22 +152,31 @@ LIFECYCLE
                          Postgres/Kafka traffic stays plaintext locally —
                          that is Phase 9 ("Bank Production Readiness") scope
                          in IMPLEMENTATION_PLAN.md, not delivered here.
-  start [--build] [--tls] [--wait-timeout N]
+  start [--build] [--tls] [--local-run] [--wait-timeout N]
                          Start postgres, zookeeper, kafka, the API,
                          prometheus, and grafana, and wait for health.
                          --build forces an image rebuild. --tls serves the
                          API over HTTPS on :8443 using certs/ (run
-                         './dev.sh certs' first).
-  stop [--volumes] [--tls]
+                         './dev.sh certs' first). --local-run starts only
+                         postgres/zookeeper/kafka (with Postgres's port
+                         published to the host) and does NOT start the app
+                         container — use this to run the app yourself via
+                         `mvn`/`java -jar` for a faster edit loop, or when
+                         the app's own Docker image can't be built in your
+                         environment. Mutually exclusive with --tls.
+  stop [--volumes] [--tls] [--local-run]
                          Stop the stack. --volumes also deletes the Postgres
                          data volume (destructive — asks to confirm).
-  restart [--build] [--tls]
+  restart [--build] [--tls] [--local-run]
                          stop then start with the same flags.
-  status [--tls]         Container states + a live health/readiness summary.
-  logs [service...] [-f|--follow] [--tail N] [--tls]
+  status [--tls] [--local-run]
+                         Container states + a live health/readiness summary.
+  logs [service...] [-f|--follow] [--tail N] [--tls] [--local-run]
                          Tail compose logs, optionally for specific services
                          (postgres, kafka, transaction-api, prometheus,
-                         grafana, zookeeper).
+                         grafana, zookeeper — transaction-api/prometheus/
+                         grafana have no logs under --local-run, since they
+                         aren't started).
 
 DEMO DATA
   seed [--timeout SECONDS] [--tls]
@@ -198,6 +217,7 @@ EXAMPLES
   ./dev.sh test --unit
   ./dev.sh perf --scenario load --vus 20 --hold 2m
   ./dev.sh start --tls   # local HTTPS demo
+  ./dev.sh start --local-run   # infra only; run the app yourself via mvn/java -jar
 EOF
 }
 
@@ -301,19 +321,34 @@ cmd_certs() {
 # ---------------------------------------------------------------------------
 
 cmd_start() {
-  local build=0 tls=0 wait_timeout=300
+  local build=0 tls=0 local_run=0 wait_timeout=300
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --build) build=1; shift ;;
       --tls) tls=1; shift ;;
+      --local-run) local_run=1; shift ;;
       --wait-timeout) wait_timeout="$2"; shift 2 ;;
       *) log_err "Unknown option for start: $1"; exit 1 ;;
     esac
   done
 
+  if [[ "$local_run" -eq 1 && "$tls" -eq 1 ]]; then
+    log_err "--local-run and --tls are mutually exclusive: --local-run doesn't start the app" \
+             "container at all, so there's no app-side listener for --tls to configure."
+    exit 1
+  fi
+
   ensure_env_file
   [[ "$tls" -eq 1 ]] && require_certs
-  compose_context "$tls"
+  compose_context "$tls" "$local_run"
+
+  if [[ "$local_run" -eq 1 ]]; then
+    log_info "Starting infra only (${COMPOSE_FILES[*]}): postgres, zookeeper, kafka..."
+    compose up -d --wait --wait-timeout "$wait_timeout" postgres zookeeper kafka
+    log_ok "Infra is up."
+    print_local_run_banner
+    return 0
+  fi
 
   local up_args=(up -d --wait --wait-timeout "$wait_timeout")
   [[ "$build" -eq 1 ]] && up_args+=(--build)
@@ -323,6 +358,31 @@ cmd_start() {
 
   log_ok "Stack is up."
   print_ready_banner "$tls"
+}
+
+print_local_run_banner() {
+  echo
+  echo "  Postgres      localhost:5432 (db=transact, user=app)"
+  echo "  Kafka         localhost:9092 (external listener)"
+  echo
+  echo "  The app itself is NOT running — run it yourself against this infra:"
+  echo
+  echo "    mvn -DskipTests package"
+  if [[ -f "$ENV_FILE" ]]; then
+    load_env
+    echo "    SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/transact \\"
+    echo "    SPRING_DATASOURCE_USERNAME=app \\"
+    echo "    SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \\"
+    echo "      java -jar target/transact-*.jar"
+    echo
+    echo "  Demo JWT (CUSTOMER, $DEFAULT_CUSTOMER_ID), once the app above is up:"
+    echo "    $(mint_token CUSTOMER "$DEFAULT_CUSTOMER_ID" 2>/dev/null || echo '(mint failed — check .env)')"
+  else
+    echo "    (run './dev.sh setup' first to generate .env with the datasource/JWT secrets)"
+  fi
+  echo
+  echo "  Next: ./dev.sh stop --local-run   (tears down just the infra containers)"
+  echo
 }
 
 print_ready_banner() {
@@ -349,15 +409,16 @@ print_ready_banner() {
 }
 
 cmd_stop() {
-  local tls=0 volumes=0
+  local tls=0 local_run=0 volumes=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --tls) tls=1; shift ;;
+      --local-run) local_run=1; shift ;;
       --volumes|-v) volumes=1; shift ;;
       *) log_err "Unknown option for stop: $1"; exit 1 ;;
     esac
   done
-  compose_context "$tls"
+  compose_context "$tls" "$local_run"
 
   if [[ "$volumes" -eq 1 ]]; then
     log_warn "This deletes the Postgres data volume (all local demo data). Continue? [y/N]"
@@ -375,29 +436,30 @@ cmd_stop() {
 }
 
 cmd_restart() {
-  # stop only understands --tls (not --build/--wait-timeout), so scan for it
-  # rather than forwarding start's full flag set to stop verbatim.
-  local tls=0
+  # stop only understands --tls/--local-run (not --build/--wait-timeout), so
+  # scan for them rather than forwarding start's full flag set to stop verbatim.
+  local tls=0 local_run=0
   for arg in "$@"; do
     [[ "$arg" == "--tls" ]] && tls=1
+    [[ "$arg" == "--local-run" ]] && local_run=1
   done
-  if [[ "$tls" -eq 1 ]]; then
-    cmd_stop --tls
-  else
-    cmd_stop
-  fi
+  local stop_args=()
+  [[ "$tls" -eq 1 ]] && stop_args+=(--tls)
+  [[ "$local_run" -eq 1 ]] && stop_args+=(--local-run)
+  cmd_stop "${stop_args[@]}"
   cmd_start "$@"
 }
 
 cmd_status() {
-  local tls=0
+  local tls=0 local_run=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --tls) tls=1; shift ;;
+      --local-run) local_run=1; shift ;;
       *) log_err "Unknown option for status: $1"; exit 1 ;;
     esac
   done
-  compose_context "$tls"
+  compose_context "$tls" "$local_run"
 
   echo "Containers:"
   compose ps
@@ -437,17 +499,18 @@ cmd_status() {
 }
 
 cmd_logs() {
-  local follow=0 tail=200 tls=0
+  local follow=0 tail=200 tls=0 local_run=0
   local services=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -f|--follow) follow=1; shift ;;
       --tail) tail="$2"; shift 2 ;;
       --tls) tls=1; shift ;;
+      --local-run) local_run=1; shift ;;
       *) services+=("$1"); shift ;;
     esac
   done
-  compose_context "$tls"
+  compose_context "$tls" "$local_run"
   local args=(logs --tail "$tail")
   [[ "$follow" -eq 1 ]] && args+=(-f)
   compose "${args[@]}" "${services[@]}"
