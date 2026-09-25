@@ -351,8 +351,12 @@ components:
           properties:
             provider:
               type: string
-              description: Source system identifier (source_id).
-              enum: [SOURCE_A, SOURCE_B, SOURCE_C]
+              description: |
+                Source system identifier (source_id) — one of the `id` values in
+                app.sources.registry (ADR-011). Not a fixed enum: the registry is
+                config-driven, so the set of valid values is deployment-specific
+                (the committed default registry ships SOURCE_A/SOURCE_B/SOURCE_C).
+              example: SOURCE_A
             transactionId:
               type: string
               description: Source-scoped transaction ID; unique only within that source.
@@ -426,7 +430,7 @@ components:
 
     CurrencySummary:
       type: object
-      required: [currency, totalDebit, totalCredit, netFlow]
+      required: [currency, totalDebit, totalCredit, netFlow, debitCount, creditCount]
       properties:
         currency:
           type: string
@@ -443,6 +447,16 @@ components:
           type: number
           description: totalCredit - totalDebit for this currency only.
           example: 7000.00
+        debitCount:
+          type: integer
+          format: int64
+          description: Number of DEBIT transactions summed into totalDebit for this currency.
+          example: 42
+        creditCount:
+          type: integer
+          format: int64
+          description: Number of CREDIT transactions summed into totalCredit for this currency.
+          example: 7
 
     CategorySummary:
       type: object

@@ -6,7 +6,7 @@
 - Spring Boot 4.1.1
 - Spring Kafka (used in-process via an application-owned messaging port)
 - PostgreSQL 16
-- Flyway (V1 + V2)
+- Flyway (V1-V4)
 - Docker / Docker Compose
 - OpenAPI (`openapi.yaml` is the committed contract; no springdoc annotation layer)
 - JUnit 5 / Testcontainers / Playwright
@@ -35,12 +35,9 @@ Modular monolith (`za.co.evilcorp.transact`) with two flows:
 ```mermaid
 graph LR
     subgraph Ingestion pipeline
-        SCH["Scheduler<br/>(ShedLock)"] --> A1["Source A adapter<br/>(mock fetch + normalize)"]
-        SCH --> A2["Source B adapter<br/>(mock fetch + normalize)"]
-        SCH --> A3["Source C adapter<br/>(mock fetch + normalize)"]
-        A1 --> PUB["TransactionEventPublisher<br/>(KafkaTransactionEventPublisher)"]
-        A2 --> PUB
-        A3 --> PUB
+        SCH["Scheduler<br/>(ShedLock)"] --> SRC["Registry-driven sources<br/>(app.sources.registry: MOCK/KAFKA/S3/HTTP)"]
+        SRC --> NORM["SourceNormalizer<br/>(strategy per registry entry)"]
+        NORM --> PUB["TransactionEventPublisher<br/>(KafkaTransactionEventPublisher)"]
         PUB --> K[("Kafka<br/>transactions.ingested")]
         K --> CONS["Kafka consumer<br/>categorize + idempotent persist"]
         CONS --> DB[("PostgreSQL 16")]
@@ -55,7 +52,7 @@ graph LR
     end
 ```
 
-- **Ingestion:** ShedLock-scheduled cycle → each in-process source adapter fetches mock data (cursor from `source_sync_state`), normalizes to `CanonicalTransaction` inside the adapter, publishes a `TransactionIngestedEvent` → Kafka consumer applies deterministic categorization and persists idempotently against `UNIQUE(source_id, source_transaction_id)` → sync state updated to `SUCCESS` or `FAILED`.
+- **Ingestion:** ShedLock-scheduled cycle → each registered source (transport selected by `app.sources.registry`: `MOCK`, `KAFKA`, `S3`, or `HTTP`) fetches from its cursor (`source_sync_state`), normalizes to `CanonicalTransaction` via its `SourceNormalizer` strategy, publishes a `TransactionIngestedEvent` → Kafka consumer applies deterministic categorization and persists idempotently against `UNIQUE(source_id, source_transaction_id)` → sync state updated to `SUCCESS` or `FAILED`.
 - **Query:** controllers are thin; `TransactionQueryService` executes keyset queries and SQL `SUM` aggregates against PostgreSQL.
 - **Layers:** `api` (HTTP + DTOs) → `application` (use-case services, scheduler, `application.dto`) → `domain` (canonical model, categorizer) → `infrastructure` (persistence, integration adapters, Kafka publisher, logging, observability). Constructor injection only; services are stateless.
 
@@ -67,7 +64,8 @@ graph LR
 | Eventual consistency + freshness metadata | Source outages must not make the API unavailable or lie about data age | [002](docs/adr/002-eventual-consistency.md), [008](docs/adr/008-partial-results-freshness.md) |
 | Identity = `(source_id, source_transaction_id)` unique pair + internal UUID | Source IDs are only source-scoped; the DB constraint is the idempotency guarantee | [003](docs/adr/003-transaction-identity.md), [005](docs/adr/005-idempotent-ingestion.md) |
 | `BigDecimal` / `DECIMAL(19,4)` for money | No floating-point rounding in financial records | [004](docs/adr/004-monetary-precision.md) |
-| Adapter ports per source, normalization inside the adapter | Heterogeneous formats stop at the adapter boundary | [006](docs/adr/006-adapter-source-integration.md) |
+| Adapter ports per source, normalization at the source boundary | Heterogeneous formats stop at the boundary regardless of transport | [006](docs/adr/006-adapter-source-integration.md) |
+| Config-driven source registry: transport in YAML, normalization in code | New source = a registry entry (+ a `SourceNormalizer` if the payload shape is new), not a new adapter class | [011](docs/adr/011-config-driven-source-registry.md) |
 | Deterministic rule-based categorization with persisted `ruleId` | Explainable categories; `category_version` tracks rule-set revisions | [007](docs/adr/007-deterministic-categorization.md) |
 | Kafka included, behind an application-owned publisher port | Broker demonstrated without lock-in; pure synchronous alternative rejected | [009](docs/adr/009-kafka-messaging-port.md) |
 | No Redis caching | Query-time reads from indexed PostgreSQL are sufficient at this scale | [010](docs/adr/010-no-redis-caching.md) |
@@ -76,7 +74,7 @@ graph LR
 
 ## Assumptions
 
-- **Sources are in-process mocks.** There are no production outbound HTTP clients. Timeouts and bounded backoff apply to the fetch/publish loop; circuit breakers are **not** implemented (see Future Evolution).
+- **The committed default registry ships three in-process `MOCK` sources** (`SOURCE_A`/`SOURCE_B`/`SOURCE_C`) so the demo and E2E suite stay deterministic and offline. Real `KAFKA`, `S3`, and `HTTP` transports exist (see [Sources](#sources)) and are opt-in per environment via `app.sources.registry` — they are not mocks once configured. Timeouts (per-transport) and bounded backoff (in `IngestionService`'s retry wrapper) apply to every transport; circuit breakers and bulkheads are **not** implemented (see Future Evolution).
 - Transactions may arrive in multiple currencies; aggregates are always reported **per currency** — no implicit conversion.
 - Cross-source deduplication is not attempted (no reliable correlation key ⇒ do not invent certainty).
 - Multi-tenant: `customerId` in the path must equal the JWT `sub`, unless the token carries the `ADMIN` role (`CustomerAccessValidator`).
@@ -87,7 +85,31 @@ graph LR
 
 ## Running Locally
 
-**Prerequisites:** JDK 21, Maven 3.9+, Docker & Docker Compose.
+**Prerequisites:** JDK 21, Maven 3.9+, Docker & Docker Compose, Node.js.
+
+### Quick start: `dev.sh`
+
+The fastest path to a running, demonstrable stack is the `dev.sh` script at the repo root — it wraps everything below (compose, secrets, JWT minting, tests, load tests) behind a handful of commands:
+
+```bash
+./dev.sh setup    # checks prerequisites, generates .env with dev-only secrets, builds the image
+./dev.sh start    # postgres, kafka, the API, prometheus, grafana — waits for health
+./dev.sh seed     # waits for the first ingestion cycle, then runs an example authenticated query
+./dev.sh status   # container states + API health + per-source sync status
+./dev.sh logs -f  # tail all services (or ./dev.sh logs transaction-api -f for one)
+./dev.sh test         # full suite (unit + Testcontainers integration)
+./dev.sh test --unit  # just the subset that doesn't need Docker, for fast iteration
+./dev.sh test --e2e   # Playwright against the running stack, same zero-skipped gate CI uses
+./dev.sh perf     # k6 load test (scripts/load-test.js) — uses a local k6 binary or falls back
+                  # to the official grafana/k6 Docker image automatically
+./dev.sh stop     # stop the stack (add --volumes to also wipe the Postgres data volume)
+./dev.sh certs && ./dev.sh start --tls   # optional: local HTTPS on :8443 (self-signed, API listener only)
+./dev.sh help     # full command reference
+```
+
+`./dev.sh setup && ./dev.sh start && ./dev.sh seed` is the whole demo bring-up. The manual, step-by-step equivalent (useful if you want to understand or customize what the script does) follows below.
+
+### Manual steps
 
 1. **Create `.env`** from the template at the repo root (never commit it):
 
@@ -145,7 +167,7 @@ graph LR
      "http://localhost:8080/v1/customers/00000000-0000-0000-0000-000000000001/transactions?limit=20"
    ```
 
-   Flyway migrations (V1 + V2) run automatically and seed the demo customer and accounts.
+   Flyway migrations (V1-V4) run automatically and seed the demo customer and accounts.
 
 > The application listens on port **8080** (`application.yml`), matching the Dockerfile `EXPOSE`, Compose mapping, and Helm probes. Override with `SERVER_PORT` if needed.
 
@@ -156,7 +178,7 @@ Machine-readable contract: [`openapi.yaml`](openapi.yaml). Human-readable contra
 | Method | Path | Auth | Purpose |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/v1/customers/{customerId}/transactions` | `CUSTOMER` (own id) or `ADMIN` | Keyset-paginated canonical transactions (`cursor`, `limit` 1–100, `category`, `direction`, `startDate`, `endDate`, `minAmount`, `maxAmount`) with `freshness` + `completeness` metadata |
-| `GET` | `/v1/customers/{customerId}/summary` | `CUSTOMER` (own id) or `ADMIN` | SQL aggregates per currency (`totalDebit`, `totalCredit`, `netFlow`) plus category breakdown; no FX conversion |
+| `GET` | `/v1/customers/{customerId}/summary` | `CUSTOMER` (own id) or `ADMIN` | SQL aggregates per currency (`totalDebit`, `totalCredit`, `netFlow`, `debitCount`, `creditCount`) plus category breakdown; no FX conversion |
 | `GET` | `/v1/admin/sources` | `ADMIN` | Per-source sync status from `source_sync_state` (`id`, `name`, `status`, `lastSuccessfulSync`, `lastAttempt`, `failureCount`, `freshnessSeconds`, `freshnessStatus`) |
 | `GET` | `/actuator/health` | open | Liveness/readiness + per-source sync detail |
 | `GET` | `/actuator/prometheus` | open (internal scrape) | Micrometer metrics scrape endpoint (`/actuator/health*`, `/actuator/info`, and `/actuator/prometheus` are unauthenticated for the compose Prometheus; the rest of `/actuator/**` requires a token) |
@@ -292,13 +314,20 @@ Partial results are always labelled: consumers can distinguish `COMPLETE` from `
 | Unit / service | JUnit 5 | `src/test/java` (e.g. `IngestionServiceTest`) |
 | Repository / integration | Testcontainers (PostgreSQL 16, Kafka) | `TransactionRepositoryTest` (duplicate + cross-source ID cases), `ResilienceTest` |
 | End-to-end | Playwright | `tests/e2e/transaction_flow.spec.ts` — list/summary shape, freshness metadata, tenant isolation (403), unauthenticated (401) |
+| Load | k6 | `scripts/load-test.js` — checks the p99 < 200ms / error-rate < 0.1% targets from `IMPLEMENTATION_PLAN.md` Phase 6 |
 
 ```bash
-./mvnw test                 # unit + Testcontainers integration
-npx playwright test         # E2E against a running instance
+./dev.sh test                 # unit + Testcontainers integration (equivalent to `mvn test`)
+./dev.sh test --unit          # only the subset that doesn't need Docker/Testcontainers
+./dev.sh test --e2e           # Playwright against a running stack, zero-skipped gate enforced
+./dev.sh perf                 # k6 load test against a running stack
+
+# Without dev.sh:
+./scripts/test.sh test        # mvn test (there is no Maven wrapper in this repo — use this or `mvn`)
+npx playwright test           # E2E against a running instance
 ```
 
-> The Playwright specs need a running stack (`docker compose up -d` + the app on `:8080`). `tests/e2e/global-setup.ts` mints a real JWT via `scripts/mint-jwt.mjs` (secret from `APP_SECURITY_JWT_SECRET`) and skips the suite cleanly when the app is not up. Playwright is intentionally outside the Maven build.
+> The Playwright specs need a running stack (`./dev.sh start` or `docker compose up -d`, app on `:8080`). `tests/e2e/global-setup.ts` mints a real JWT via `scripts/mint-jwt.mjs` (secret from `APP_SECURITY_JWT_SECRET`) and skips the suite cleanly when the app is not up — a skipped run is NOT a passing run (see `docs/principal_engineer_review_report.md`, finding C-01); `./dev.sh test --e2e` and CI both enforce zero-skipped via `scripts/e2e-assert.mjs`. Playwright and k6 are intentionally outside the Maven build.
 
 ## Observability
 
@@ -310,36 +339,40 @@ npx playwright test         # E2E against a running instance
   - Scrape path: **`/actuator/prometheus`** (unauthenticated for the bundled internal Prometheus; `/actuator/health*` and `/actuator/info` are also open — other actuator endpoints require a JWT)
 - **Correlation IDs:** `CorrelationIdFilter` reads or generates `X-Correlation-ID`, stores it in MDC (`correlationId`), and the same value is returned as `traceId` on every ProblemDetail error response.
 - **Structured logging:** logback JSON output via `LogstashEncoder` in the `prod` profile **or when no profile is active** (the `default` logback profile); plain-text console logs in the `dev`/`development` profile.
-- **Health:** `/actuator/health` includes a custom sync indicator with per-source `SUCCESS`/`FAILED` detail — distinguishes "process alive" from "ingestion functional".
-- **Compose extras:** Prometheus and Grafana containers start with default configuration; custom dashboards and alert rules are not shipped yet.
+- **Health:** `/actuator/health` includes a custom sync indicator (bean name `sync`), but `management.endpoint.health.show-details` is left at the Boot default (`never`) so anonymous callers only see `{"status":...}` — use `GET /v1/admin/sources` (ADMIN token) for per-source detail, which is what `./dev.sh status` and `./dev.sh seed` do.
+- **Compose extras:** Prometheus starts with default configuration. Grafana auto-provisions one dashboard (`grafana/dashboards/transact-overview.json` — ingestion outcomes, sync success/failure, HTTP latency/status, DB pool) at `http://localhost:3000` (admin/admin, dev-only). It covers what's instrumented today, not the Executive/Infra views or alert rules Phase 6 of `IMPLEMENTATION_PLAN.md` still tracks as open.
 
 ## Future Evolution
 
 Not built today — deliberately deferred, not silently omitted:
 
-- **Real outbound HTTP clients** (WebClient) replacing in-process mock adapters, with per-source timeouts, retries, and bulkheads.
 - **Transactional outbox** for exactly-once-style publish reliability between commit and Kafka send (at-least-once + idempotent consumer is the current model).
-- **Circuit breakers** (Resilience4j) around source fetch and broker publish.
+- **Circuit breakers and bulkheads** (Resilience4j) around source fetch and broker publish — the `KAFKA`/`S3`/`HTTP` transports have per-call timeouts and `IngestionService`-level retry/backoff today, but no breaker to stop hammering a source that is down, and no limit on concurrent in-flight calls per source.
 - **Materialized aggregates** when query volume justifies precomputed summaries (query-time SQL is the current model).
 - **Multi-region deployment** (cross-region replicas, failover runbooks) — single-region only today.
 - **Restore drills** for the recovery plan: RPO/RTO values in [`docs/recovery-plan.md`](docs/recovery-plan.md) are **targets only and untested**.
-- OpenTelemetry distributed tracing, K6 load tests, Terraform provisioning, and Grafana dashboards beyond the default containers.
+- OpenTelemetry distributed tracing and Terraform provisioning.
+- A K6 load test script now ships (`scripts/load-test.js`, run via `./dev.sh perf`) and one Grafana dashboard is auto-provisioned — neither has been run against a live, production-representative stack yet (no CI job for either), and Grafana's Executive/Infra views plus alert rules remain open (`IMPLEMENTATION_PLAN.md` Phase 6).
+- Local HTTPS for the API is available for demos (`./dev.sh certs && ./dev.sh start --tls`) but is self-signed and covers the API's own listener only — Postgres/Kafka traffic and inter-service mTLS stay plaintext; see **Phase 9: Bank Production Readiness** in `IMPLEMENTATION_PLAN.md`.
 
 ## Project Layout
 
 ```
 docs/            01-assumptions, 02-domain-model, 03-architecture, 04-api-contract,
-                 recovery-plan, adr/ (001–010)
+                 recovery-plan, handoffs-index (+ the 5 handoffs it links), adr/ (001-012)
 openapi.yaml     committed machine-readable API contract
 src/main/java/za/co/evilcorp/transact/
   api/           REST controllers + response DTOs
   application/   use-case services, scheduler, application DTOs
   domain/        canonical model, categorizer (pure Java)
   infrastructure/ persistence (JPA), source adapters, Kafka publisher, logging, metrics
-  security/      JWT filter, tenant/customer access validation
+  security/      JWT filter, customer access validation
   config/        wiring
-src/main/resources/db/migration/   Flyway V1 + V2
+src/main/resources/db/migration/   Flyway V1-V4
 tests/e2e/       Playwright specs
+scripts/         mint-jwt.mjs, e2e-assert.mjs, load-test.js (k6), test.sh
 helm/transact/   Kubernetes chart
-Dockerfile, docker-compose.yml, .github/workflows/ci.yml
+grafana/         provisioning/ (datasource + dashboard provider), dashboards/ (JSON)
+dev.sh           local dev/demo entrypoint — setup, start/stop/status/logs, seed, test, perf
+Dockerfile, docker-compose.yml, docker-compose.tls.yml, .github/workflows/ci.yml
 ```

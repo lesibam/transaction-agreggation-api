@@ -152,7 +152,9 @@ public class TransactionQueryService {
     private CurrencyTotals toCurrencyTotals(CurrencySummaryRow row) {
         BigDecimal debit = row.getTotalDebit() == null ? BigDecimal.ZERO : row.getTotalDebit();
         BigDecimal credit = row.getTotalCredit() == null ? BigDecimal.ZERO : row.getTotalCredit();
-        return new CurrencyTotals(row.getCurrency(), debit, credit, credit.subtract(debit));
+        long debitCount = row.getDebitCount() == null ? 0L : row.getDebitCount();
+        long creditCount = row.getCreditCount() == null ? 0L : row.getCreditCount();
+        return new CurrencyTotals(row.getCurrency(), debit, credit, credit.subtract(debit), debitCount, creditCount);
     }
 
     private CategoryTotals toCategoryTotals(CategorySummaryRow row) {

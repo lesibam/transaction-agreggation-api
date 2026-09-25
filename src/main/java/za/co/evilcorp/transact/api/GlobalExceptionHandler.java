@@ -13,11 +13,14 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
 import java.util.NoSuchElementException;
@@ -25,6 +28,21 @@ import java.util.NoSuchElementException;
 /**
  * Must outrank Spring Boot's auto-configured ProblemDetailsExceptionHandler
  * (order 0) so RFC 7807 bodies always include our type + traceId extensions.
+ * {@code Ordered.HIGHEST_PRECEDENCE} (Integer.MIN_VALUE) is used specifically
+ * because it's the one value no future default from Boot can silently tie or
+ * beat without an equally explicit, visible change on Boot's side.
+ *
+ * In practice this class's own {@code Exception.class} catch-all below means
+ * it matches every exception type and is always selected before Boot's
+ * handler is ever consulted, regardless of the exact @Order value - Spring
+ * picks the first advice bean (in order) that has *any* matching handler
+ * method, not the most specific match across all beans. That's exactly why
+ * HttpRequestMethodNotSupportedException/HttpMediaTypeNotSupportedException/
+ * NoResourceFoundException needed their own explicit handlers here (fixed
+ * 2026-09-25, M-04): without them, the catch-all silently turned a wrong
+ * HTTP method, an unsupported content type, or an unmapped route into a
+ * generic 500 instead of the correct 405/415/404 - the real bug this
+ * ordering coupling was hiding.
  */
 @Slf4j
 @RestControllerAdvice
@@ -64,6 +82,30 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ProblemDetail> handleConflict(DataIntegrityViolationException ex, HttpServletRequest request) {
         return problem(ERROR_BASE + "conflict", "Conflict", 409,
                 "The request conflicts with the current state of the resource.", request);
+    }
+
+    // These three are handled explicitly because the Exception.class catch-all
+    // below would otherwise swallow them into a generic 500 - they matched no
+    // handler method here before this fix, so the catch-all's broad match won
+    // regardless of this class's @Order relative to Boot's own
+    // ProblemDetailsExceptionHandler (see the class Javadoc and
+    // docs/principal_engineer_review_report.md M-04).
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ProblemDetail> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
+        return problem(ERROR_BASE + "method-not-allowed", "Method Not Allowed", 405,
+                detailOrDefault(ex, "This method is not supported for this resource."), request);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ProblemDetail> handleUnsupportedMediaType(HttpMediaTypeNotSupportedException ex, HttpServletRequest request) {
+        return problem(ERROR_BASE + "unsupported-media-type", "Unsupported Media Type", 415,
+                detailOrDefault(ex, "This media type is not supported for this resource."), request);
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ProblemDetail> handleNoResourceFound(NoResourceFoundException ex, HttpServletRequest request) {
+        return problem(ERROR_BASE + "not-found", "Not Found", 404,
+                "No route matches this request.", request);
     }
 
     @ExceptionHandler(Exception.class)

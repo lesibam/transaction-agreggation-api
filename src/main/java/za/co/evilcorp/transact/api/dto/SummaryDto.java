@@ -8,7 +8,13 @@ public record SummaryDto(
         List<CategorySummary> categoryBreakdown,
         MetaDto meta) {
 
-    public record CurrencySummary(String currency, BigDecimal totalDebit, BigDecimal totalCredit, BigDecimal netFlow) {
+    public record CurrencySummary(
+            String currency,
+            BigDecimal totalDebit,
+            BigDecimal totalCredit,
+            BigDecimal netFlow,
+            long debitCount,
+            long creditCount) {
     }
 
     public record CategorySummary(String category, BigDecimal amount, String currency, long transactionCount) {

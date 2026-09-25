@@ -1,7 +1,6 @@
 package za.co.evilcorp.transact.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,14 +25,16 @@ public class KafkaProducerConfig {
 
     @Bean
     public ProducerFactory<String, TransactionIngestedEvent> transactionEventProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers) {
+            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers,
+            ObjectMapper objectMapper) {
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
 
-        ObjectMapper eventMapper = new ObjectMapper();
-        eventMapper.registerModule(new JavaTimeModule());
-
-        JsonSerializer<TransactionIngestedEvent> valueSerializer = new JsonSerializer<>(eventMapper);
+        // Shared Jackson2Config bean (java.time support) - the same instance
+        // KafkaConsumerConfig and SecurityConfig use, so all three Jackson 2
+        // call sites in this Boot-4-with-Jackson-3-by-default app agree on one
+        // configuration instead of drifting independently. See ADR-012.
+        JsonSerializer<TransactionIngestedEvent> valueSerializer = new JsonSerializer<>(objectMapper);
         valueSerializer.setAddTypeInfo(false);
 
         return new DefaultKafkaProducerFactory<>(

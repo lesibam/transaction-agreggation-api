@@ -8,6 +8,8 @@
 | **Baseline reviewed** | Working tree (no VCS baseline exists — see H-01) |
 | **Method** | Full source review (72 main + 19 test classes), dependency/image inspection, two full `mvn test` runs, live docker-compose deployment, in-container HTTP probes, first genuine Playwright E2E execution |
 
+> **Update (2026-09-24):** An independent follow-up review verified all three sign-off conditions below are now closed and found one new (non-blocking) scope finding. **Current verdict: Pass.** See §10 for the follow-up and §9 for the original conditions it discharges.
+
 ---
 
 ## 1. Executive Summary
@@ -76,16 +78,16 @@ These are not compliments — each is verified against source or a running syste
 | H-02 | High | CI/Security | Trivy scan is non-blocking (`continue-on-error`) — violates security standards | Open |
 | H-03 | High | CI/Testing | No packaged-artifact verification in CI (compose smoke test); MockMvc slices don't cover the composed runtime | Open |
 | M-01 | Medium | Config hygiene | Dead/misleading Kafka consumer props in `application.yml` (incl. `spring.json.trusted.packages: "*"`) | Open |
-| M-02 | Medium | Consistency | Jackson 2 / Jackson 3 dual stack with two hand-built Jackson 2 mappers | Open |
-| M-03 | Medium | Security clarity | `TenantContext` is a write-only ThreadLocal; `tenantId` claim never used for scoping | Open |
-| M-04 | Medium | Fragility | `@Order(HIGHEST_PRECEDENCE)` coupling to Boot's ProblemDetailsExceptionHandler | Open (guarded by tests) |
+| M-02 | Medium | Consistency | Jackson 2 / Jackson 3 dual stack with two hand-built Jackson 2 mappers | **Fixed 2026-09-25** — see §5 |
+| M-03 | Medium | Security clarity | `TenantContext` is a write-only ThreadLocal; `tenantId` claim never used for scoping | **Fixed 2026-09-25** — deleted, see §5 |
+| M-04 | Medium | Fragility | `@Order(HIGHEST_PRECEDENCE)` coupling to Boot's ProblemDetailsExceptionHandler | **Re-scoped & fixed 2026-09-25** — real bug found underneath, see §5 |
 | M-05 | Medium | Contract | `openapi.yaml` hand-maintained; no automated contract verification | Open |
-| M-06 | Medium | Secrets | Helm chart materializes secrets from `.Values` into release metadata | Open |
+| M-06 | Medium | Secrets | Helm chart materializes secrets from `.Values` into release metadata | **Partially fixed 2026-09-25** — see §5 |
 | M-07 | Medium | Config | `spring.jpa.open-in-view` left default (WARN on every boot) | Open |
-| L-01 | Low | Data | No `CHECK` constraint on `transactions.direction` (`DEBIT`/`CREDIT`) | Open |
+| L-01 | Low | Data | No `CHECK` constraint on `transactions.direction` (`DEBIT`/`CREDIT`) | **Fixed 2026-09-25** — see §5 |
 | L-02 | Low | Ingestion | Mock adapters ignore the cursor for data generation → duplicate publishes every cycle | By design (mock), note |
 | L-03 | Low | Tooling | `mint-jwt.mjs` silently falls back to the committed test secret | Open |
-| L-04 | Low | Persistence | Summary SQL computes `debitCount`/`creditCount` that the mapping discards | Open (nit) |
+| L-04 | Low | Persistence | Summary SQL computes `debitCount`/`creditCount` that the mapping discards | **Fixed 2026-09-25** — see §5 |
 | L-05 | Low | Observability | `CorrelationIdFilter` never echoes the correlation id in the response | Open |
 | L-06 | Low | Infra | Kafka external listener advertises `localhost:9092` while e2e override maps host `9093` | Documented in override |
 | L-07 | Low | Infra | Compose Grafana default `admin/admin` | Acceptable (dev-only) |
@@ -180,7 +182,9 @@ This is the same harness the review just validated locally (5/5), so the job is 
 
 **Risk.** Serialization drift between the Kafka path, the error-writer path, and the HTTP DTO path (three different mappers with three different `java.time` behaviors). Today all observable paths are correct (API tests + E2E assert ISO-8601 shapes), so this is consistency debt, not a bug.
 
-**Recommendation.** Consolidate: inject the shared Jackson 2 `ObjectMapper` bean into `KafkaProducerConfig` instead of building a second one; add a one-line ADR note documenting *why* Jackson 2 exists in a Boot 4 app (the comment in `Jackson2Config` is good — promote it to ADR-011 so the next engineer doesn't "clean it up").
+**Recommendation.** Consolidate: inject the shared Jackson 2 `ObjectMapper` bean into `KafkaProducerConfig` instead of building a second one; add a one-line ADR note documenting *why* Jackson 2 exists in a Boot 4 app (the comment in `Jackson2Config` is good — promote it to an ADR so the next engineer doesn't "clean it up").
+
+> **Fixed 2026-09-25.** `KafkaProducerConfig.transactionEventProducerFactory` now takes `ObjectMapper objectMapper` as a parameter instead of building `new ObjectMapper()` + `registerModule(new JavaTimeModule())` inline — it's the same `Jackson2Config.jackson2ObjectMapper()` bean `SecurityConfig` and `KafkaConsumerConfig` already used, autowired by type (safe because Jackson 3 lives under a different package, `tools.jackson.*`, so there's exactly one bean of Jackson 2's `ObjectMapper` type in the context — no `@Qualifier` needed). `docs/adr/012-jackson-2-in-boot-4.md` written as recommended (numbered 012, not 011 — `main` independently claimed ADR-011 for the config-driven source registry during a rebase on 2026-09-25). Verified: `mvn compile` clean.
 
 ---
 
@@ -192,6 +196,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 
 **Recommendation.** Decide. Either delete `TenantContext` (and document that tenancy is represented by `customers.tenant_id` and enforced at the customer-identity boundary), or make it real by adding `tenant_id` to the keyset/summary predicates. Given the guide's scope, deletion + documentation is the honest choice; note it in ADR-002.
 
+> **Fixed 2026-09-25.** `TenantContext.java` deleted; `JwtAuthenticationFilter` no longer references it (the `sub`-claim `UUID.fromString` validation it used to gate on is preserved as an explicit check). Documented in `docs/03-architecture.md` §2.5 rather than ADR-002 — the security layer's own architecture section, which already described `TenantContext`, was the section that would otherwise still be wrong, and is where the next reader actually looks.
+
 ---
 
 ### M-04 — `@Order(HIGHEST_PRECEDENCE)` coupling to Boot internals (Medium)
@@ -201,6 +207,10 @@ This is the same harness the review just validated locally (5/5), so the job is 
 **Mitigations already present.** The coupling is documented in the class comment and guarded by `ApiValidationTest` asserting full problem details (including `traceId`) on bad requests.
 
 **Recommendation.** Choose one: (a) remove `spring.mvc.problemdetails.enabled` and own the problem+json rendering entirely, or (b) keep it and add a dedicated test asserting `GlobalExceptionHandler` wins the ordering (e.g., `@Order` value comparison or a `ProblemDetailsExceptionHandler`-specific 400 shape test). Option (a) is the lower-magic option consistent with the engineering principles.
+
+> **Re-investigated 2026-09-25 — found a more important bug underneath this one, fixed that instead of the ordering.** Neither (a) nor (b) as originally framed, because tracing Spring's actual advice-resolution algorithm changes the picture: `ExceptionHandlerExceptionResolver` picks the *first* `@ControllerAdvice` bean (in `@Order`) that has *any* matching `@ExceptionHandler` method — it does not compare specificity across beans. `GlobalExceptionHandler` has an `Exception.class` catch-all, which matches *every* exception type. That means it **always** wins over Boot's `ProblemDetailsExceptionHandler`, for every exception, regardless of the exact `@Order` value, as long as it's ordered ahead at all — `HIGHEST_PRECEDENCE` (`Integer.MIN_VALUE`) is in fact about as future-proof as Spring ordering gets; the "silent degradation on a Boot upgrade" risk the original finding worried about is smaller than it looked.
+>
+> The real bug the catch-all was hiding: Boot's `ProblemDetailsExceptionHandler` — never actually reached — normally gives correct status codes to several Spring MVC exceptions this app's own advice didn't explicitly handle. Concretely, before this fix, a **wrong HTTP method** (`HttpRequestMethodNotSupportedException`), an **unsupported content type** (`HttpMediaTypeNotSupportedException`), and an **entirely unmapped route** (`NoResourceFoundException`) were all silently falling into the `Exception.class` catch-all and returning a generic `500 Internal Server Error` instead of the correct `405`/`415`/`404`. **Fixed**: three explicit `@ExceptionHandler` methods added for these types in `GlobalExceptionHandler`, using the same `problem()` helper as everything else. Left `@Order(HIGHEST_PRECEDENCE)` and `spring.mvc.problemdetails.enabled` untouched — changing either would have zero effect on behavior today (fully shadowed either way) and only added risk for no correctness gain. Added `ApiValidationTest.wrongHttpMethodReturnsProblemDetail405` and `.unknownRouteReturnsProblemDetail404`. Verified: `mvn test-compile` clean, `./dev.sh test --unit` still green. The two new tests themselves need Testcontainers to run — not executed live in this environment (no Docker); a reviewer with Docker should confirm both pass.
 
 ---
 
@@ -218,6 +228,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 
 **Recommendation.** For the demo cluster this is tolerable and clearly labeled; before any production claim, switch to ExternalSecrets/SealedSecrets or at minimum document a rotation procedure and forbid `--set secret.*` in runbooks. Add a values schema that refuses empty secret values (fail helm template early).
 
+> **Partially fixed 2026-09-25.** The "refuses empty secret values" half is done: `helm/transact/templates/secret.yaml` now calls `fail` if either secret is empty *or* still equal to its `values.yaml` placeholder default, so a `helm install` with no `--set` overrides errors out instead of silently shipping `change-me-dev-only` to a real cluster. `.github/workflows/ci.yml`'s `deploy-demo` job updated to pass `secret.springDatasourcePassword`/`secret.appSecurityJwtSecret` from two new GitHub Actions secrets it didn't need before (`DEMO_SPRING_DATASOURCE_PASSWORD`, `DEMO_APP_SECURITY_JWT_SECRET`) — **neither is configured on this repo today**, so if `KUBECONFIG` is ever added to actually enable that job, these two must be added alongside it or the Helm render will fail by design. **Not fixed**: the underlying ExternalSecrets/SealedSecrets migration and a documented rotation procedure — real infra work needing a target platform, still open. **Unverified**: no `helm` binary was reachable in this environment (egress to `get.helm.sh` and `github.com/helm/helm/releases` both blocked by the proxy policy) — the template change was written against well-established Helm/Sprig syntax (`fail`, `empty`, `eq`, `or`) but never run through `helm template`/`helm lint`. Run `helm lint ./helm/transact` and `helm template ./helm/transact --set secret.springDatasourcePassword=x --set secret.appSecurityJwtSecret=y` before trusting this in CI.
+
 ---
 
 ### M-07 — `spring.jpa.open-in-view` left at default (Medium-Low)
@@ -231,6 +243,8 @@ This is the same harness the review just validated locally (5/5), so the job is 
 ### L-01 — No `CHECK` on `transactions.direction`
 V1 declares `direction VARCHAR(10)` with a comment — not a constraint (`-- 'DEBIT' or 'CREDIT'`). V2 added a status CHECK to `source_sync_state` but not to `transactions`. The enum mapping makes bad values unlikely, but invariants belong in the database per the DBA rules. Add `CHECK (direction IN ('DEBIT','CREDIT'))` in the next migration.
 
+> **Fixed 2026-09-25.** `V4__transactions_direction_check.sql` adds `CHECK (direction IN ('DEBIT', 'CREDIT'))`, matching V2's `source_sync_state.status` pattern exactly. `hibernate.ddl-auto: validate` doesn't validate CHECK constraints (no `@Check` mapping exists in the entity), so this can't cause a startup validation failure. Not yet run against a live Postgres in this environment (no Docker) — the SQL is a direct copy of an already-proven pattern, but a reviewer with Docker should still run `./dev.sh start` once and confirm Flyway applies it cleanly. (Numbered V4, not V3 — `main` independently claimed `V3__source_d_demo_account.sql` during a rebase on 2026-09-25; the two migrations are unrelated and both apply cleanly in sequence.)
+
 ### L-02 — Mock adapters ignore the cursor
 `SourceAAdapter.simulateApiCall` (lines 60-78) returns the same records regardless of cursor, so every 60 s cycle re-publishes known records and relies on idempotency to skip them. Correct and self-proving — but it also means the live system emits a stream of duplicate-key WARNs forever (observed in container logs). For demo realism and log hygiene, make adapters return an empty page when the cursor indicates "already seen", or lower the Hibernate WARN for constraint 23505. Document whichever is chosen.
 
@@ -239,6 +253,8 @@ V1 declares `direction VARCHAR(10)` with a comment — not a constraint (`-- 'DE
 
 ### L-04 — Dead aggregate columns
 `TransactionRepository.java:77-78` computes `debitCount`/`creditCount`; `TransactionQueryService.toCurrencyTotals` (150-154) drops them. Either surface them in `SummaryDto` (cheap, and counts are genuinely useful) or remove from the SQL.
+
+> **Fixed 2026-09-25.** Surfaced, not removed. Threaded through the whole chain: `CurrencySummaryRow` gained `getDebitCount()`/`getCreditCount()` (the SQL columns existed but nothing bound to them — Spring Data's native-query projection matches columns to interface getters by name, so a missing getter silently drops the column at the JDBC boundary, before it ever reaches Java), `CurrencyTotals` and `SummaryDto.CurrencySummary` gained matching fields, `openapi.yaml` documents them. Test coverage added in `ApiSummaryCurrencyTest.returnsSeparateTotalsPerCurrency`. Verified: `mvn test-compile` clean across the full chain; `./dev.sh test --unit` still green. The new assertions themselves need Testcontainers to actually run (no Docker in this environment) — a reviewer with Docker should confirm the test passes, not just compiles.
 
 ### L-05 — Correlation id is not echoed to clients
 `CorrelationIdFilter.java:28-33` sets the MDC only. During the §6 incident, the response header `X-Correlation-Id` I observed actually came from the *impostor* application — our app does not echo one. Add `((HttpServletResponse) response).setHeader(CORRELATION_ID_HEADER, correlationId)` so clients can quote the trace id in support tickets (the ProblemDetail `traceId` extension covers errors; normal 200s currently carry no correlation).
@@ -300,7 +316,7 @@ Recorded because the *pattern* is more instructive than the bug, and because the
 4. Delete dead Kafka consumer props from `application.yml`; single-source the factory. (M-01)
 5. Decide `TenantContext`: delete + document, or enforce. (M-03)
 6. OpenAPI drift test (spec-driven property assertions). (M-05)
-7. Consolidate Jackson 2 mappers; ADR-011 on Jackson 2-in-Boot-4. (M-02)
+7. Consolidate Jackson 2 mappers; ADR-012 on Jackson 2-in-Boot-4. (M-02)
 8. OSIV off. (M-07)
 
 **P2 — backlog**
@@ -322,6 +338,103 @@ Sign-off is withheld pending exactly three conditions — all process, all small
 3. The E2E/compose verification wired into CI with a no-skipped assertion.
 
 When those land, this codebase is in the top tier of what I would expect to hand to production engineering for the next stage (real source adapters, SLIs, load profiles) — the foundations (idempotency, honesty of metadata, failure taxonomy) are the hard parts, and they are right.
+
+---
+
+## 10. Follow-up Review — 2026-09-24 (Independent Verification)
+
+**Reviewer.** A separate principal-engineer pass, one day later, in a sandboxed review environment with **no Docker daemon available** (`docker info` fails). This constrains the method: git history, the CI workflow definition, and static source/config inspection substitute for live compose/Testcontainers runs. Where that matters, it is called out explicitly rather than silently assumed.
+
+### 10.1 P0 remediation — verified CLOSED
+
+All three sign-off conditions from §9 are independently confirmed in the tree, not just claimed in `IMPLEMENTATION_PLAN.md`:
+
+| Condition | Evidence | Status |
+|---|---|---|
+| H-01 version control | `git log --oneline` shows 5 commits from `12fa9b1` (baseline) through `d1f7ae6`; a real history exists, `.env` is not tracked | **Closed** |
+| H-02 blocking Trivy | `.github/workflows/ci.yml:50-57` — `exit-code: '1'`, `severity: CRITICAL,HIGH`, `ignore-unfixed: true`; commit `4807e23` shows this gate actually caught and drove a fix (embedded Tomcat CVEs) | **Closed** |
+| H-03 / C-01 composed-runtime + zero-skipped E2E in CI | `.github/workflows/ci.yml:81-139` (`e2e-smoke` job) boots the real compose stack, asserts the auth/error contract over HTTP, then runs Playwright through `scripts/e2e-assert.mjs` which fails the job on any `status: "skipped"` | **Closed** |
+
+This is real remediation, not documentation theater — each fix is a genuine control (a failing exit code, a real HTTP assertion), not a comment saying it was done.
+
+### 10.2 P1/P2 findings — re-checked, unchanged
+
+Every Medium/Low finding from §4 was re-verified directly against current source. All are **still open**, byte-for-byte as originally described — three commits landed since baseline and all three were process/CI-only (`582831f`, `4807e23`, `d1f7ae6`); none touched application code:
+
+- **M-01** — `application.yml:22-23` still sets `spring.json.trusted.packages: "*"` / a default type, dead against `KafkaConsumerConfig`'s own factory. Unchanged.
+- **M-03** — `TenantContext` still has exactly one writer (`JwtAuthenticationFilter`) and zero readers repo-wide. Unchanged.
+- **M-07** — `spring.jpa.open-in-view` is still absent from `application.yml` (Boot default `true` still applies, still WARNs on boot). Unchanged.
+- **L-01** — `transactions.direction` is still a bare `VARCHAR(10)` with a comment, no `CHECK`, in both V1 and V2. Unchanged.
+- **L-03** — `scripts/mint-jwt.mjs:17-18` still falls back to the committed test secret with no stderr warning. Unchanged.
+- **L-04** — `TransactionRepository.java:77-78` still computes `debitCount`/`creditCount`; `SummaryDto.CurrencySummary` still has no fields for them. Unchanged.
+- **L-05** — `CorrelationIdFilter.java` still only writes MDC; it never calls `response.setHeader(...)`. Unchanged.
+
+**This is itself the finding.** The prior report's P0/P1/P2 tiering worked exactly as designed — the three items gating sign-off got fixed, and the rest did not move, because nothing forces them to. That is a reasonable prioritization outcome for a first pass, but if it repeats across further review cycles, "Medium" becomes a polite synonym for "never." See the logged lesson in §10.5.
+
+### 10.3 New finding: N-01 — Helm/Kubernetes deployment contradicts the guide's own explicit scope guidance (Medium, Architecture/Scope)
+
+**Evidence.** `transaction-aggregation-staff-engineer-guide-2.md` §85 ("What Not to Build") lists **Kubernetes** first among the things to avoid "unless the requirements specifically demand them," framing the exercise as demonstrating *restraint*, not technology breadth. §96K ("Deployment Environments") is concrete about what "demo" should be: *"demo: Docker Compose or small VPS."* §96L reinforces it: *"If the assessment requires a deployed demonstration, a small Linux VPS is sufficient."*
+
+The delivered system instead ships a full Helm chart (`helm/transact/templates/{deployment,service,secret,...}.yaml`) and a CI job (`deploy-demo` in `.github/workflows/ci.yml:147-167`) that runs `helm upgrade --install` against a Kubernetes cluster for the demo environment — the exact shape of scope the guide asks candidates to justify or avoid.
+
+**Why it matters.** Nothing in `docs/adr/` addresses *why* Kubernetes was chosen for a demo tier the guide explicitly says doesn't need it (grep of `docs/adr/*.md` for "kubernetes"/"helm" — no results). Compare this to how well-justified the rest of the stack is: ten ADRs cover Postgres, eventual consistency, idempotency, the messaging port, etc., each closing with "why not the alternative." Kubernetes is the one infrastructure decision in the tree with no ADR and no justification against the guide's own checklist — it reads as reached-for rather than chosen. This doesn't cost correctness points, but it does cost the "knows when not to use it" signal the guide says is the actual thing being assessed (§85: *"The goal is not to demonstrate how many technologies you can deploy... The goal is to demonstrate that you know when not to use them."*).
+
+**Recommendation.** Either (a) add a new ADR (next available number — 011 and 012 are now taken by the config-driven source registry and the Jackson 2-in-Boot-4 decision) stating the concrete reason Kubernetes is in scope (e.g., "target platform is already Kubernetes at evilcorp, demo must match production" — if true, this is a good reason and just needs to be written down), or (b) keep the Helm chart as documented **future evolution** (it's genuinely fine engineering) but stop running `deploy-demo` by default — point the demo tier at Compose on a VPS per §96L, matching what the guide actually asked for.
+
+### 10.4 Correction to §7: duplicate records ARE measurable
+
+The original review's Assessment by Dimension didn't call this out explicitly, and the Design Review Checklist item ("Are duplicate records measurable?") deserves a direct answer: **yes** — `TransactionIngestedListener.java:50` increments `transact.ingestion.records.duplicates` (tagged by `source`) every time the unique-constraint path is taken, alongside `transact.ingestion.records.received/published/quarantined` and `transact.ingestion.source.sync.success/failure` in `IngestionService.java`. This is a real strength that should be listed alongside the other verified-metrics items in §3.11, not left implicit.
+
+### 10.5 Verification note on this pass's own limits
+
+`mvn compile` succeeded cleanly. Of the 9 test classes that don't require Testcontainers/`@SpringBootTest`, running them directly (`KeysetCursorTest`, `ResilienceTest`, `QuarantineTest`, `IdempotencyTest`, `SyncFailureTest`, `RuleBasedCategorizerTest`, `CustomerAccessValidatorTest`, `SourceAdapterNormalizationTest`, plus `IngestionServiceTest` which turned out to need a full Spring context) produced **56 run, 53 passed, 3 errors** — the 3 errors are `IngestionServiceTest` failing application-context startup, consistent with the missing datasource/Kafka broker in this sandbox (no Docker), not a code regression. The full 90-test Testcontainers suite and the composed-runtime E2E smoke were **not** re-run here; §10.1's confidence rests on CI's own gate definition and commit history, not a fresh live run. A reviewer with Docker access should still do one.
+
+> **Correction (2026-09-25, while building `dev.sh`):** `IdempotencyTest` does *not* belong in that "doesn't require Testcontainers" list — it `extends AbstractIntegrationTest`, which is `@SpringBootTest` + shared Testcontainers Postgres/Kafka. It happened to pass in the run above only because `IngestionServiceTest` hit the "no Docker" failure first in that particular execution order and absorbed all 3 reported errors; re-running the corrected 7-class subset (dropping both `IdempotencyTest` and `IngestionServiceTest`) is genuinely container-free and passed cleanly, 53/53, in this same Docker-less environment. `dev.sh`'s `UNIT_ONLY_TESTS` list uses the corrected 7 classes.
+>
+> **Further correction (2026-09-25, later the same day, post-rebase):** the 7-class list above included `SourceAdapterNormalizationTest`, which `main`'s config-driven source registry (ADR-011) deleted — that class no longer exists in the tree this branch was rebased onto. `./dev.sh test --unit` was consequently running one fewer class than intended, silently, with no error (a missing `-Dtest` pattern just contributes nothing rather than failing). Fixed in `dev.sh` to the actual current Docker-free set — `SourceNormalizerTest`, `HttpTransactionSourceTest`, `MockTransactionSourceTest`, and `SyncHealthIndicatorTest` (all new classes the same registry refactor added) replace it. Re-verified green: **66/66**. See `IMPLEMENTATION_PLAN.md`'s Local Demoability item for the current authoritative count — this report's own numbers above (53/53, 56 run/53 passed/3 errors) remain accurate as historical record of the 2026-09-24 run they describe, not of the tree as it stands today.
+
+### 10.6 Updated Assessment by Dimension
+
+| Dimension | Prior (2026-09-23) | Now (2026-09-24) | Why it moved |
+|---|---|---|---|
+| Delivery & process | 4/10 | **9/10** | All three P0 gates (VCS, blocking scan, zero-skipped composed E2E in CI) verified closed with real controls, not just claims |
+| Architecture & boundaries | 9/10 | **8/10** | Same strengths (TenantContext aside) minus one point for N-01 — the one infrastructure choice in the tree without an ADR, and one the guide explicitly flags |
+| All other dimensions | as §7 | **unchanged** | No application code changed since the baseline review; re-verified, not re-scored |
+
+### 10.7 Updated Verdict
+
+**Pass** (upgraded from Conditional Pass). All three sign-off conditions from §9 are met. Remaining Medium/Low items are real but non-blocking technical debt, explicitly tracked, none of them safety- or correctness-critical. The one new item (N-01) is a scope-justification gap, not a defect — closing it is a paperwork fix (write the ADR) or a scope-reduction fix (stop deploying to K8s by default), not an engineering one.
+
+### 10.8 Lessons logged
+
+Per the Continuous Improvement Loop (`claude.md` §11, added 2026-09-24), the following were logged to `docs/retrospectives/LESSONS.md` as a result of this review: non-blocking findings not converging across cycles without a forcing function, and new infrastructure not being checked against the guide's own "What Not to Build" list before being added. One resulting change was applied directly to the Architect agent's definition in `claude.md` (see the lessons log for the exact diff and rationale).
+
+---
+
+## 11. Remediation Session — 2026-09-25
+
+§10.2 predicted exactly this outcome: *"'Medium' becomes a polite synonym for 'never'... unless something forces it."* This session is that forcing function — every Medium/Low finding from §4 was worked through directly, not just re-logged.
+
+**Closed (10 of 10 findings addressed):**
+
+| ID | Outcome |
+|---|---|
+| M-01 | Fixed — and turned out worse than reported: not just two dead `properties.*` lines but the *entire* `spring.kafka.consumer`/`producer` block was dead. Removed. |
+| M-02 | Fixed — consolidated onto the one shared Jackson 2 bean; `docs/adr/012-jackson-2-in-boot-4.md` added. |
+| M-03 | Fixed — `TenantContext` deleted (not enforced), per the review's own recommended path. |
+| M-04 | Fixed — and turned out to be a different, more important bug than reported: not really an ordering fragility (the catch-all made `@Order`'s exact value moot), but three real exception types silently returning `500` instead of `405`/`415`/`404`. |
+| M-06 | Partially fixed — fail-fast Helm guard added; the real ExternalSecrets/KMS migration stays open (genuine infra work). |
+| M-07 | Fixed — verified safe first (no entity has a JPA association for OSIV to matter to). |
+| L-01 | Fixed — `V4__transactions_direction_check.sql`. |
+| L-03 | Fixed — stderr warning on secret fallback. |
+| L-04 | Fixed — `debitCount`/`creditCount` threaded through the full stack instead of discarded at the JDBC projection boundary. |
+| L-05 | Fixed — correlation ID echoed on every response. |
+
+**Still open, unchanged, and correctly so:** L-02 (mock adapters ignore cursor — by design), L-06/L-07/L-08 (documented/acceptable for a demo topology). All of Phase 9 ("Bank Production Readiness") remains open — none of today's fixes were an attempt at that bar, and `IMPLEMENTATION_PLAN.md` was updated where a Phase 9 line referenced a now-partially-stale finding (M-03, M-06).
+
+**Pattern worth naming, since it happened twice in one session:** two of these findings (M-01, M-04) were *understated* by the original review — the actual root cause, once traced fully, was bigger than what got written down. Both times, fixing the finding as literally described would have been a smaller, less valuable fix than what the code actually needed. Worth remembering for future review rounds: a finding's initial framing is a starting point for investigation, not a fixed scope for the fix.
+
+**What's genuinely verified vs. not.** `mvn compile`/`test-compile` ran clean after every change; the 53-test Docker-free subset (`./dev.sh test --unit`) passed after every batch. Nothing requiring Testcontainers or a live Postgres/Kafka (the new migration, the new/changed integration tests, the summary API's new fields end-to-end) has run live — no Docker daemon was available in this session, same limitation as §10.5. The Helm change is additionally unverified against `helm template`/`helm lint` — no `helm` binary was reachable (egress to `get.helm.sh` and `github.com/helm/helm/releases` both blocked by proxy policy). **A reviewer with Docker and Helm should run the full suite and `helm lint` before treating this session's changes as done, not just committed.**
 
 ---
 
