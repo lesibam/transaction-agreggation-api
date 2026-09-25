@@ -29,6 +29,7 @@
              Enforced by the blocking Trivy gate in CI. Remove this
              override once the Boot parent manages >= 11.0.25. -->
         <tomcat.version>11.0.25</tomcat.version>
+        <swagger-ui.version>5.32.15</swagger-ui.version>
     </properties>
 
     <!-- Dependency management: pin Testcontainers modules (fixes missing-version build break) -->
@@ -137,6 +138,17 @@
             <artifactId>s3</artifactId>
         </dependency>
 
+        <!-- Static swagger-ui distribution (assets only, no annotation scanning) to
+             render the hand-maintained openapi.yaml - see ADR-014. Not exposed via
+             Boot's automatic /webjars/** mapping: spring.web.resources.add-mappings
+             is off, and DocsResourceConfig serves these assets itself under
+             /docs-assets/** so app.docs.enabled genuinely gates them. -->
+        <dependency>
+            <groupId>org.webjars</groupId>
+            <artifactId>swagger-ui</artifactId>
+            <version>${swagger-ui.version}</version>
+        </dependency>
+
         <!-- Utilities -->
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -222,6 +234,23 @@
 </dependencies>
 
     <build>
+        <!-- Two source locations: the usual src/main/resources, plus the repo-root
+             openapi.yaml copied as-is into webapp/docs/ so the docs page (ADR-014)
+             serves the exact same file the API contract doc links to - one authored
+             copy, no hand-duplication to drift out of sync (the M-05 finding this
+             project already tracks is about hand-vs-generated drift, not this). -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}</directory>
+                <includes>
+                    <include>openapi.yaml</include>
+                </includes>
+                <targetPath>webapp/docs</targetPath>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

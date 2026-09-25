@@ -20,6 +20,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
@@ -104,6 +105,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ProblemDetail> handleNoResourceFound(NoResourceFoundException ex, HttpServletRequest request) {
+        return problem(ERROR_BASE + "not-found", "Not Found", 404,
+                "No route matches this request.", request);
+    }
+
+    // Same "nothing matched" outcome as NoResourceFoundException above, but a
+    // different exception class: NoResourceFoundException is thrown by the
+    // default catch-all /** static-resource handler, which only exists while
+    // spring.web.resources.add-mappings is true. This app turns that off (see
+    // UiResourceConfig/DocsResourceConfig - the toggle for /ui, /docs would
+    // otherwise leak through Boot's unconditional default mapping), so an
+    // unmatched request never reaches a resource handler at all and
+    // DispatcherServlet raises this instead. Both must produce the same 404,
+    // not let one silently fall through to the 500 catch-all below.
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<ProblemDetail> handleNoHandlerFound(NoHandlerFoundException ex, HttpServletRequest request) {
         return problem(ERROR_BASE + "not-found", "Not Found", 404,
                 "No route matches this request.", request);
     }

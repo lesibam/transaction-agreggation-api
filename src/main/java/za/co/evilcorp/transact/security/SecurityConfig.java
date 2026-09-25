@@ -46,6 +46,15 @@ public class SecurityConfig {
                 // and scraped on the internal compose network.
                 .requestMatchers("/actuator/prometheus").permitAll()
                 .requestMatchers("/actuator/**").authenticated()
+                // The dashboard (ADR-013) and docs viewer (ADR-014) are static
+                // HTML/CSS/JS shells - no session, no server-side rendering of
+                // customer data. The dashboard's JS calls /v1/** itself with a
+                // Bearer token the user supplies; that call is what's actually
+                // gated (the two rules below). Neither path exists at all when
+                // its own app.ui.enabled/app.docs.enabled toggle is off -
+                // UiResourceConfig/DocsResourceConfig simply don't register a
+                // handler, so this permitAll is moot in that case, not a hole.
+                .requestMatchers("/ui", "/ui/**", "/docs", "/docs/**", "/docs-assets/**").permitAll()
                 .requestMatchers("/v1/admin/**").hasRole("ADMIN")
                 .requestMatchers("/v1/customers/**").hasAnyRole("CUSTOMER", "ADMIN")
                 .anyRequest().authenticated()
