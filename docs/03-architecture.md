@@ -7,15 +7,9 @@ This document describes the high-level architectural design of the Transact plat
 ```mermaid
 graph TD
     subgraph Ingestion
-        SCH["IngestionScheduler<br/>(ShedLock-protected)"] --> A1[Source A Adapter]
-        SCH --> A2[Source B Adapter]
-        SCH --> A3[Source C Adapter]
-        A1 --> N1["Normalization<br/>(inside adapter)"]
-        A2 --> N2["Normalization<br/>(inside adapter)"]
-        A3 --> N3["Normalization<br/>(inside adapter)"]
-        N1 --> PUB["TransactionEventPublisher port"]
-        N2 --> PUB
-        N3 --> PUB
+        SCH["IngestionScheduler<br/>(ShedLock-protected)"] --> REG["Registry-driven sources<br/>(app.sources.registry: MOCK/KAFKA/S3/HTTP)"]
+        REG --> NORM["SourceNormalizer<br/>(strategy per registry entry)"]
+        NORM --> PUB["TransactionEventPublisher port"]
         PUB --> KPUB["KafkaTransactionEventPublisher"]
         KPUB --> K[("Kafka<br/>transactions.ingested")]
         K --> LISTENER["Kafka listener<br/>(consumer)"]
@@ -57,7 +51,7 @@ graph TD
 - **Responsibility**: Technical implementations:
     - **Persistence**: Spring Data JPA / PostgreSQL (`persistence.entity`, `persistence.repository`).
     - **Messaging**: Kafka implementation of the messaging port (`KafkaTransactionEventPublisher`).
-    - **Integration**: Source adapters (`integration.adapter`) that fetch **in-process mock data** and normalize it to the canonical model. There are **no outbound HTTP clients** for sources today — mock adapters stand in for future HTTP integrations.
+    - **Integration**: Registry-driven source transports (`integration.adapter` — `MockTransactionSource`, `KafkaTransactionSource`, `S3TransactionSource`, `HttpTransactionSource`), selected per entry in `app.sources.registry` (ADR 011). Normalization happens at the source boundary via a `SourceNormalizer` strategy (`integration.normalizer`), keyed by the registry entry's `normalizer` field — independent of transport, so an S3 drop and a MOCK file of the same payload shape share a normalizer. The committed default registry ships three `MOCK` sources so the demo/E2E stay deterministic; `KAFKA`, `S3`, and `HTTP` are real transports, opt-in per environment.
     - **Logging**: `CorrelationIdFilter` (MDC `correlationId` from `X-Correlation-ID`).
     - **Observability**: Micrometer metrics and the custom sync `HealthIndicator`.
 
@@ -80,9 +74,9 @@ Delivery is **at-least-once**; the consumer is idempotent via `UNIQUE(source_id,
 `IngestionScheduler` runs on a fixed interval (`app.ingestion.interval-ms`). Scheduling is guarded by **ShedLock** so that in a multi-instance deployment only one instance executes a given cycle — preventing duplicate concurrent fetch/publish work without requiring singleton deployments.
 
 ### 3.3 Pipeline Flow
-1. **Fetch**: The scheduler triggers each `TransactionSource` adapter with the stored cursor from `source_sync_state`.
-2. **Normalize**: The adapter converts raw (mock) source payloads to `CanonicalTransaction`; `normalizationVersion` is recorded.
-3. **Publish**: The adapter publishes `TransactionIngestedEvent` via `TransactionEventPublisher` (bounded retries/backoff on the publish path).
+1. **Fetch**: The scheduler triggers each registered `TransactionSource` (transport selected by `app.sources.registry`) with the stored cursor from `source_sync_state`.
+2. **Normalize**: The source's `SourceNormalizer` strategy converts the raw payload to `CanonicalTransaction`; `normalizationVersion` is recorded.
+3. **Publish**: The source publishes `TransactionIngestedEvent` via `TransactionEventPublisher` (bounded retries/backoff on the publish path).
 4. **Consume + Categorize**: The Kafka listener applies the `TransactionCategorizer` (`category_code`, `category_version`, persisted `ruleId`).
 5. **Persist**: The consumer inserts idempotently — duplicates are rejected by the `UNIQUE(source_id, source_transaction_id)` constraint (insert-or-ignore semantics; no check-then-insert races).
 6. **Sync state**: `source_sync_state` is updated to `SUCCESS` (cursor + `last_successful_sync`) or `FAILED` (`failure_count`, `last_error`).
@@ -112,8 +106,7 @@ The API calculates freshness as `now() - last_successful_sync` against configura
 
 ## 6. Deliberate Non-Goals (current revision)
 
-- No outbound HTTP clients for sources (mocks only).
-- No Resilience4j circuit breakers / bulkheads (bounded retry/backoff only; circuit breaker is evolution).
+- No Resilience4j circuit breakers / bulkheads around source fetch or broker publish (per-transport timeouts + `IngestionService`-level bounded retry/backoff only; circuit breakers and bulkheads are evolution). This applies to all four transports, including the real `KAFKA`/`S3`/`HTTP` ones (ADR 011) — a source that is down gets retried and marked `FAILED`, not isolated.
 - No transactional outbox (at-least-once + idempotent consumer instead).
 - No Redis caching (query-time reads from PostgreSQL; ADR 010).
 - No springdoc annotations — `openapi.yaml` at the repo root is the committed contract.

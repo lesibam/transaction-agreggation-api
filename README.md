@@ -6,7 +6,7 @@
 - Spring Boot 4.1.1
 - Spring Kafka (used in-process via an application-owned messaging port)
 - PostgreSQL 16
-- Flyway (V1 + V2)
+- Flyway (V1-V4)
 - Docker / Docker Compose
 - OpenAPI (`openapi.yaml` is the committed contract; no springdoc annotation layer)
 - JUnit 5 / Testcontainers / Playwright
@@ -35,12 +35,9 @@ Modular monolith (`za.co.evilcorp.transact`) with two flows:
 ```mermaid
 graph LR
     subgraph Ingestion pipeline
-        SCH["Scheduler<br/>(ShedLock)"] --> A1["Source A adapter<br/>(mock fetch + normalize)"]
-        SCH --> A2["Source B adapter<br/>(mock fetch + normalize)"]
-        SCH --> A3["Source C adapter<br/>(mock fetch + normalize)"]
-        A1 --> PUB["TransactionEventPublisher<br/>(KafkaTransactionEventPublisher)"]
-        A2 --> PUB
-        A3 --> PUB
+        SCH["Scheduler<br/>(ShedLock)"] --> SRC["Registry-driven sources<br/>(app.sources.registry: MOCK/KAFKA/S3/HTTP)"]
+        SRC --> NORM["SourceNormalizer<br/>(strategy per registry entry)"]
+        NORM --> PUB["TransactionEventPublisher<br/>(KafkaTransactionEventPublisher)"]
         PUB --> K[("Kafka<br/>transactions.ingested")]
         K --> CONS["Kafka consumer<br/>categorize + idempotent persist"]
         CONS --> DB[("PostgreSQL 16")]
@@ -55,7 +52,7 @@ graph LR
     end
 ```
 
-- **Ingestion:** ShedLock-scheduled cycle → each in-process source adapter fetches mock data (cursor from `source_sync_state`), normalizes to `CanonicalTransaction` inside the adapter, publishes a `TransactionIngestedEvent` → Kafka consumer applies deterministic categorization and persists idempotently against `UNIQUE(source_id, source_transaction_id)` → sync state updated to `SUCCESS` or `FAILED`.
+- **Ingestion:** ShedLock-scheduled cycle → each registered source (transport selected by `app.sources.registry`: `MOCK`, `KAFKA`, `S3`, or `HTTP`) fetches from its cursor (`source_sync_state`), normalizes to `CanonicalTransaction` via its `SourceNormalizer` strategy, publishes a `TransactionIngestedEvent` → Kafka consumer applies deterministic categorization and persists idempotently against `UNIQUE(source_id, source_transaction_id)` → sync state updated to `SUCCESS` or `FAILED`.
 - **Query:** controllers are thin; `TransactionQueryService` executes keyset queries and SQL `SUM` aggregates against PostgreSQL.
 - **Layers:** `api` (HTTP + DTOs) → `application` (use-case services, scheduler, `application.dto`) → `domain` (canonical model, categorizer) → `infrastructure` (persistence, integration adapters, Kafka publisher, logging, observability). Constructor injection only; services are stateless.
 
@@ -67,7 +64,8 @@ graph LR
 | Eventual consistency + freshness metadata | Source outages must not make the API unavailable or lie about data age | [002](docs/adr/002-eventual-consistency.md), [008](docs/adr/008-partial-results-freshness.md) |
 | Identity = `(source_id, source_transaction_id)` unique pair + internal UUID | Source IDs are only source-scoped; the DB constraint is the idempotency guarantee | [003](docs/adr/003-transaction-identity.md), [005](docs/adr/005-idempotent-ingestion.md) |
 | `BigDecimal` / `DECIMAL(19,4)` for money | No floating-point rounding in financial records | [004](docs/adr/004-monetary-precision.md) |
-| Adapter ports per source, normalization inside the adapter | Heterogeneous formats stop at the adapter boundary | [006](docs/adr/006-adapter-source-integration.md) |
+| Adapter ports per source, normalization at the source boundary | Heterogeneous formats stop at the boundary regardless of transport | [006](docs/adr/006-adapter-source-integration.md) |
+| Config-driven source registry: transport in YAML, normalization in code | New source = a registry entry (+ a `SourceNormalizer` if the payload shape is new), not a new adapter class | [011](docs/adr/011-config-driven-source-registry.md) |
 | Deterministic rule-based categorization with persisted `ruleId` | Explainable categories; `category_version` tracks rule-set revisions | [007](docs/adr/007-deterministic-categorization.md) |
 | Kafka included, behind an application-owned publisher port | Broker demonstrated without lock-in; pure synchronous alternative rejected | [009](docs/adr/009-kafka-messaging-port.md) |
 | No Redis caching | Query-time reads from indexed PostgreSQL are sufficient at this scale | [010](docs/adr/010-no-redis-caching.md) |
@@ -76,7 +74,7 @@ graph LR
 
 ## Assumptions
 
-- **Sources are in-process mocks.** There are no production outbound HTTP clients. Timeouts and bounded backoff apply to the fetch/publish loop; circuit breakers are **not** implemented (see Future Evolution).
+- **The committed default registry ships three in-process `MOCK` sources** (`SOURCE_A`/`SOURCE_B`/`SOURCE_C`) so the demo and E2E suite stay deterministic and offline. Real `KAFKA`, `S3`, and `HTTP` transports exist (see [Sources](#sources)) and are opt-in per environment via `app.sources.registry` — they are not mocks once configured. Timeouts (per-transport) and bounded backoff (in `IngestionService`'s retry wrapper) apply to every transport; circuit breakers and bulkheads are **not** implemented (see Future Evolution).
 - Transactions may arrive in multiple currencies; aggregates are always reported **per currency** — no implicit conversion.
 - Cross-source deduplication is not attempted (no reliable correlation key ⇒ do not invent certainty).
 - Multi-tenant: `customerId` in the path must equal the JWT `sub`, unless the token carries the `ADMIN` role (`CustomerAccessValidator`).
@@ -169,7 +167,7 @@ The fastest path to a running, demonstrable stack is the `dev.sh` script at the 
      "http://localhost:8080/v1/customers/00000000-0000-0000-0000-000000000001/transactions?limit=20"
    ```
 
-   Flyway migrations (V1 + V2) run automatically and seed the demo customer and accounts.
+   Flyway migrations (V1-V4) run automatically and seed the demo customer and accounts.
 
 > The application listens on port **8080** (`application.yml`), matching the Dockerfile `EXPOSE`, Compose mapping, and Helm probes. Override with `SERVER_PORT` if needed.
 
@@ -348,9 +346,8 @@ npx playwright test           # E2E against a running instance
 
 Not built today — deliberately deferred, not silently omitted:
 
-- **Real outbound HTTP clients** (WebClient) replacing in-process mock adapters, with per-source timeouts, retries, and bulkheads.
 - **Transactional outbox** for exactly-once-style publish reliability between commit and Kafka send (at-least-once + idempotent consumer is the current model).
-- **Circuit breakers** (Resilience4j) around source fetch and broker publish.
+- **Circuit breakers and bulkheads** (Resilience4j) around source fetch and broker publish — the `KAFKA`/`S3`/`HTTP` transports have per-call timeouts and `IngestionService`-level retry/backoff today, but no breaker to stop hammering a source that is down, and no limit on concurrent in-flight calls per source.
 - **Materialized aggregates** when query volume justifies precomputed summaries (query-time SQL is the current model).
 - **Multi-region deployment** (cross-region replicas, failover runbooks) — single-region only today.
 - **Restore drills** for the recovery plan: RPO/RTO values in [`docs/recovery-plan.md`](docs/recovery-plan.md) are **targets only and untested**.
@@ -362,7 +359,7 @@ Not built today — deliberately deferred, not silently omitted:
 
 ```
 docs/            01-assumptions, 02-domain-model, 03-architecture, 04-api-contract,
-                 recovery-plan, handoffs-index (+ the 4 handoffs it links), adr/ (001-011)
+                 recovery-plan, handoffs-index (+ the 5 handoffs it links), adr/ (001-012)
 openapi.yaml     committed machine-readable API contract
 src/main/java/za/co/evilcorp/transact/
   api/           REST controllers + response DTOs
@@ -371,7 +368,7 @@ src/main/java/za/co/evilcorp/transact/
   infrastructure/ persistence (JPA), source adapters, Kafka publisher, logging, metrics
   security/      JWT filter, customer access validation
   config/        wiring
-src/main/resources/db/migration/   Flyway V1-V3
+src/main/resources/db/migration/   Flyway V1-V4
 tests/e2e/       Playwright specs
 scripts/         mint-jwt.mjs, e2e-assert.mjs, load-test.js (k6), test.sh
 helm/transact/   Kubernetes chart
