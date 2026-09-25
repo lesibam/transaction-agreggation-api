@@ -63,7 +63,7 @@ This configuration defines the multi-agent team required to implement a producti
   - PostgreSQL schema design and UUID primary keys.
   - Immutable Flyway migrations.
   - Indexing strategy and query optimization (avoiding N+1).
-  - Database constraints for invariant enforcement.
+  - Database constraints for invariant enforcement — including defining exactly which constraints a disaster-recovery restore must re-verify, and the untested Flyway-migration-replay scenario (a snapshot restored older than the latest migration); handed off in `docs/recovery-drill-handoff.md`.
 - **Ownership**: `src/main/resources/db/migration/`
 
 ### 8. Testing Engineer
@@ -82,7 +82,8 @@ This configuration defines the multi-agent team required to implement a producti
   - Structured JSON logging and Correlation IDs.
   - CI/CD pipeline and immutable Docker images.
   - Disaster Recovery: Backup and Recovery verification (RPO/RTO).
-  - Alerting: owns where an alert actually fires (Alertmanager/Grafana alerting config, routing, on-call posture) once the SLI-owning agent defines what/threshold — see `docs/handoffs-index.md` for all four handoffs; the Alertmanager-vs-Grafana-unified-alerting routing decision is raised once (`docs/reconciliation-alerting-handoff.md` §5) and reused by every other handoff that needs it.
+  - Alerting: owns where an alert actually fires (Alertmanager/Grafana alerting config, routing, on-call posture) once the SLI-owning agent defines what/threshold — see `docs/handoffs-index.md` for all five handoffs; the Alertmanager-vs-Grafana-unified-alerting routing decision is raised once (`docs/reconciliation-alerting-handoff.md` §5) and reused by every other handoff that needs it.
+  - Executing recovery drills against `docs/recovery-plan.md` — post-restore verification specifics (which constraints to re-check, the Flyway-migration-replay scenario) are DBA's and Data Reconciliation Engineer's input, handed off in `docs/recovery-drill-handoff.md`; SRE still owns the runbook itself and the actual restore mechanics.
 - **Ownership**: `Dockerfile`, `docker-compose.yml`, `helm/`, `prometheus/`, `grafana/`
 
 ### 10. Documentation Engineer
@@ -111,6 +112,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Defining reconciliation tolerances and alerting thresholds per source, in partnership with Operations/SRE Engineer (who owns where the alert actually fires) — handed off in `docs/reconciliation-alerting-handoff.md`.
   - Root-causing reconciliation drift when it fires — a mis-mapped account, a record that was quarantined but should have matched, a source's own reporting lag — in partnership with Integration Engineer, since drift often traces back to an adapter's normalization logic.
   - Distinguishing genuine data-integrity drift from expected timing lag (a source's freshness window) so alerts stay actionable — coordinates with the freshness/completeness model Domain Expert and Architect already own (ADR 002, ADR 008).
+  - Providing the strongest available evidence that a disaster-recovery restore preserved correct data — a post-restore reconciliation pass, not just internal-consistency checks — handed off in `docs/recovery-drill-handoff.md` §3.
 - **Ownership**: `src/main/java/za/co/evilcorp/transact/application/service/reconciliation/` (to be created; co-located with, not carved out of, Backend Engineer's `application/` tree — Backend Engineer still owns the surrounding service layer conventions), reconciliation dashboards under `grafana/dashboards/`.
 
 ### 13. Meta-Agent (Continuous Improvement)
