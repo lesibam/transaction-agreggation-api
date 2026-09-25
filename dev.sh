@@ -551,7 +551,14 @@ cmd_seed() {
 # (IdempotencyTest extends AbstractIntegrationTest; IngestionServiceTest is
 # @SpringBootTest) — see docs/principal_engineer_review_report.md §10.5,
 # which mistakenly included IdempotencyTest in this list; corrected here.
-UNIT_ONLY_TESTS="KeysetCursorTest,ResilienceTest,QuarantineTest,SyncFailureTest,RuleBasedCategorizerTest,CustomerAccessValidatorTest,SourceAdapterNormalizationTest"
+# TransactionRepositoryTest, KafkaTransactionSourceTest, S3TransactionSourceTest,
+# AdminSourcesEndpointTest, ApiIsolationTest, ApiPaginationAndFilterTest,
+# ApiSummaryCurrencyTest, and ApiValidationTest are also excluded for the same
+# reason (@SpringBootTest / Testcontainers KafkaContainer / GenericContainer).
+# SourceAdapterNormalizationTest no longer exists post-ADR-011 (config-driven
+# source registry, landed on main 2026-09-25) — replaced by SourceNormalizerTest
+# plus the per-transport tests below.
+UNIT_ONLY_TESTS="KeysetCursorTest,ResilienceTest,QuarantineTest,SyncFailureTest,RuleBasedCategorizerTest,CustomerAccessValidatorTest,SourceNormalizerTest,HttpTransactionSourceTest,MockTransactionSourceTest,SyncHealthIndicatorTest"
 
 cmd_test() {
   local mode="full"
