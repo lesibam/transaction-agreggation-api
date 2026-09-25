@@ -161,7 +161,7 @@ The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done
 - [ ] **Data Classification & Retention** *(owner: Compliance & Governance Agent)*: A documented PII/data-classification policy and a retention/erasure procedure aligned to the applicable regime (POPIA, given `za.co.evilcorp`), reviewed before any real source adapter — replacing today's mock adapters — carries real customer data.
 - [ ] **Independent Security Testing** *(owner: Compliance & Governance Agent, in partnership with Security)*: A penetration test and a SAST/dependency review beyond Trivy's image scan, completed before production go-live.
 
-*Dependency note: this phase assumes Phase 6's and Phase 7's remaining open items (Distributed Tracing, Operational Dashboards, Alerting Strategy, Load Testing, Failure Injection) are also closed — none of the items above substitute for them.*
+*Dependency note: this phase assumes Phase 6's and Phase 7's remaining open items (Distributed Tracing, Operational Dashboards, Alerting Strategy, Load Testing, Failure Injection) are also closed — none of the items above substitute for them. Four of these items already have a proposed handoff to Operations/SRE Engineer written — see `docs/handoffs-index.md`.*
 
 ---
 

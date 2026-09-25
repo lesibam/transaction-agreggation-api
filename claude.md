@@ -82,7 +82,7 @@ This configuration defines the multi-agent team required to implement a producti
   - Structured JSON logging and Correlation IDs.
   - CI/CD pipeline and immutable Docker images.
   - Disaster Recovery: Backup and Recovery verification (RPO/RTO).
-  - Alerting: owns where an alert actually fires (Alertmanager/Grafana alerting config, routing, on-call posture) once the SLI-owning agent defines what/threshold — see `docs/observability-alerting-handoff.md` (general SLOs) and `docs/reconciliation-alerting-handoff.md` (reconciliation-specific); the routing mechanism decision in the former applies to both.
+  - Alerting: owns where an alert actually fires (Alertmanager/Grafana alerting config, routing, on-call posture) once the SLI-owning agent defines what/threshold — see `docs/handoffs-index.md` for all four handoffs; the Alertmanager-vs-Grafana-unified-alerting routing decision is raised once (`docs/reconciliation-alerting-handoff.md` §5) and reused by every other handoff that needs it.
 - **Ownership**: `Dockerfile`, `docker-compose.yml`, `helm/`, `prometheus/`, `grafana/`
 
 ### 10. Documentation Engineer

@@ -362,16 +362,16 @@ Not built today — deliberately deferred, not silently omitted:
 
 ```
 docs/            01-assumptions, 02-domain-model, 03-architecture, 04-api-contract,
-                 recovery-plan, adr/ (001–010)
+                 recovery-plan, handoffs-index (+ the 4 handoffs it links), adr/ (001-011)
 openapi.yaml     committed machine-readable API contract
 src/main/java/za/co/evilcorp/transact/
   api/           REST controllers + response DTOs
   application/   use-case services, scheduler, application DTOs
   domain/        canonical model, categorizer (pure Java)
   infrastructure/ persistence (JPA), source adapters, Kafka publisher, logging, metrics
-  security/      JWT filter, tenant/customer access validation
+  security/      JWT filter, customer access validation
   config/        wiring
-src/main/resources/db/migration/   Flyway V1 + V2
+src/main/resources/db/migration/   Flyway V1-V3
 tests/e2e/       Playwright specs
 scripts/         mint-jwt.mjs, e2e-assert.mjs, load-test.js (k6), test.sh
 helm/transact/   Kubernetes chart
