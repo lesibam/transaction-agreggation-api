@@ -25,8 +25,28 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  web:
+    resources:
+      # Boot's own /webjars/** and /** static mappings are unconditional -
+      # they would serve the swagger-ui webjar (and anything later dropped
+      # under src/main/resources/static/) regardless of app.docs.enabled /
+      # app.ui.enabled. Off here; UiResourceConfig and DocsResourceConfig
+      # (config/) register their own mappings, each behind its own
+      # @ConditionalOnProperty, so the toggles are real.
+      add-mappings: false
 
 app:
+  ui:
+    # Serves the read-only web dashboard (ADR-013) at /ui/**. Disable for a
+    # production deployment that doesn't want an internal tool reachable
+    # alongside the API - the API itself (/v1/**) is unaffected either way.
+    enabled: true
+  docs:
+    # Serves openapi.yaml + a swagger-ui viewer (ADR-014) at /docs/** and
+    # /docs-assets/**. Independent of app.ui.enabled by design: some
+    # deployments want API docs reachable for integrators even with the
+    # internal dashboard switched off.
+    enabled: true
   security:
     jwt-secret: ${APP_SECURITY_JWT_SECRET}
     jwt-issuer: transact

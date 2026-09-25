@@ -173,7 +173,7 @@ The fastest path to a running, demonstrable stack is the `dev.sh` script at the 
 
 ## API
 
-Machine-readable contract: [`openapi.yaml`](openapi.yaml). Human-readable contract: [`docs/04-api-contract.md`](docs/04-api-contract.md).
+Machine-readable contract: [`openapi.yaml`](openapi.yaml). Human-readable contract: [`docs/04-api-contract.md`](docs/04-api-contract.md). Rendered, interactive contract: `/docs` once the stack is running (a `swagger-ui` viewer over the exact same file — see [Web Dashboard & API Docs](#web-dashboard--api-docs)).
 
 | Method | Path | Auth | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -184,6 +184,17 @@ Machine-readable contract: [`openapi.yaml`](openapi.yaml). Human-readable contra
 | `GET` | `/actuator/prometheus` | open (internal scrape) | Micrometer metrics scrape endpoint (`/actuator/health*`, `/actuator/info`, and `/actuator/prometheus` are unauthenticated for the compose Prometheus; the rest of `/actuator/**` requires a token) |
 
 Errors are RFC 7807 `application/problem+json` with `type`, `title`, `status`, `detail`, `instance`, and a `traceId` extension copied from the `correlationId` MDC key. Pagination is keyset-based — the sort key is `(transaction_date DESC, id DESC)`; `meta.nextCursor` encodes the last row's sort key.
+
+## Web Dashboard & API Docs
+
+Two optional, independently-toggleable browser UIs — both static assets with zero server-side authority of their own (ADR-013, ADR-014):
+
+| | URL | Toggle (default `true`) | What it is |
+| :--- | :--- | :--- | :--- |
+| Dashboard | `/ui/` | `app.ui.enabled` | A read-only ledger view over `/v1/**` — paste a JWT (`./dev.sh token`), browse transactions with filters/keyset pagination, per-currency summaries, category breakdown, and (ADMIN tokens) per-source sync status. Holds the token in `sessionStorage` only; every request it makes is authorized exactly like any other API caller. |
+| API docs | `/docs/` | `app.docs.enabled` | A `swagger-ui` viewer pointed at the exact same [`openapi.yaml`](openapi.yaml) linked above — not a `springdoc`-generated spec (README's "no springdoc annotation layer" choice stands; ADR-014 explains why). |
+
+Both are plain HTML/CSS/JS (`src/main/resources/webapp/`), no build step. Disable either for a production deployment that shouldn't expose internal tooling — `app.ui.enabled: false` / `app.docs.enabled: false` (or `APP_UI_ENABLED=false` / `APP_DOCS_ENABLED=false`) make the path genuinely 404 (no handler registered), not just hide a link. The API itself (`/v1/**`) is unaffected by either toggle.
 
 ## Data Model
 
@@ -359,7 +370,7 @@ Not built today — deliberately deferred, not silently omitted:
 
 ```
 docs/            01-assumptions, 02-domain-model, 03-architecture, 04-api-contract,
-                 recovery-plan, handoffs-index (+ the 5 handoffs it links), adr/ (001-012)
+                 recovery-plan, handoffs-index (+ the 5 handoffs it links), adr/ (001-014)
 openapi.yaml     committed machine-readable API contract
 src/main/java/za/co/evilcorp/transact/
   api/           REST controllers + response DTOs
@@ -367,7 +378,8 @@ src/main/java/za/co/evilcorp/transact/
   domain/        canonical model, categorizer (pure Java)
   infrastructure/ persistence (JPA), source adapters, Kafka publisher, logging, metrics
   security/      JWT filter, customer access validation
-  config/        wiring
+  config/        wiring, UI/docs toggles (UiResourceConfig, DocsResourceConfig)
+src/main/resources/webapp/   dashboard (ui/) + API docs viewer (docs/) - ADR-013, ADR-014
 src/main/resources/db/migration/   Flyway V1-V4
 tests/e2e/       Playwright specs
 scripts/         mint-jwt.mjs, e2e-assert.mjs, load-test.js (k6), test.sh

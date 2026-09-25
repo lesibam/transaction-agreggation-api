@@ -89,7 +89,7 @@ This configuration defines the multi-agent team required to implement a producti
 ### 10. Documentation Engineer
 - **Primary Responsibility**: Technical communication and specifications.
 - **Key Focus**:
-  - OpenAPI specifications (Swagger).
+  - OpenAPI specification content (`openapi.yaml`) — hand-maintained, not generated (README, ADR-014). Rendering it in a browser is the UI/UX Engineer's `/docs` viewer (ADR-014); this agent owns the spec's content, not its presentation.
   - Project READMEs and module documentation.
   - Sequence diagrams for critical workflows.
   - Maintaining the API Contract.
@@ -116,7 +116,7 @@ This configuration defines the multi-agent team required to implement a producti
 - **Ownership**: `src/main/java/za/co/evilcorp/transact/application/service/reconciliation/` (to be created; co-located with, not carved out of, Backend Engineer's `application/` tree — Backend Engineer still owns the surrounding service layer conventions), reconciliation dashboards under `grafana/dashboards/`.
 
 ### 13. Meta-Agent (Continuous Improvement)
-- **Primary Responsibility**: Continuously observe how the other twelve agents perform and evolve their definitions in this document so the team gets measurably better over time. This agent improves *agents*, not application code.
+- **Primary Responsibility**: Continuously observe how the other thirteen agents perform and evolve their definitions in this document so the team gets measurably better over time. This agent improves *agents*, not application code.
 - **Key Focus**:
   - Mining recurring review comments, CI/CD failures, reverted commits, and incident postmortems for root causes traceable to a gap in an agent's `Key Focus` or `Ownership` scope (e.g., repeated Security findings on code the Backend Engineer owns signal a missing checklist item, not a one-off bug).
   - Proposing precise, evidence-backed edits to another agent's `Key Focus` or `Ownership` bullets — never to its `Authority`, and never by taking over its owned paths directly.
@@ -128,6 +128,15 @@ This configuration defines the multi-agent team required to implement a producti
   - Changes to this document still require Coordinator sign-off, per the Shared Contract rules below; the Meta-Agent proposes, it does not unilaterally merge.
   - Improves the team's definitions and working agreements, not the product's domain logic, security posture, or infrastructure — those stay with the owning agent.
 - **Ownership**: `claude.md` (proposes changes only, Coordinator approves), `docs/retrospectives/`
+
+### 14. UI/UX Engineer
+- **Primary Responsibility**: The read-only web dashboard and the API docs viewer — the only two things in this codebase a human looks at in a browser rather than through `curl`/an API client (ADR-013, ADR-014). Owns visual/interaction design and the client-side code; owns zero server-side authority — every dashboard request is authorized exactly like any other API caller.
+- **Key Focus**:
+  - Visual and interaction design for `/ui/**`, grounded in the `frontend-design` skill's process — a deliberate token system (color, type, layout, signature) built for this product's actual subject matter, not a generic admin-template default. See `webapp/ui/styles.css`'s header comment and ADR-013 for the current design's rationale and the signature element it commits to.
+  - Never adding server-side authority to the dashboard: it is a browser for the existing `/v1/**` contract, nothing more. A feature that needs the dashboard to do something the API can't already do for a caller holding the same token is an API change first (Backend Engineer), not something to route around here.
+  - Keeping `app.ui.enabled`/`app.docs.enabled` genuine toggles: a change under this agent's ownership must still fully 404 when its property is off (no handler registered), never just hide a link — see ADR-013's Implementation section for why that distinction matters.
+  - The API docs viewer's presentation (`webapp/docs/index.html`, pointing swagger-ui at the existing spec) — Documentation Engineer still owns `openapi.yaml`'s content; this agent owns rendering it, never generating it (ADR-014's whole point is that there is exactly one spec).
+- **Ownership**: `src/main/resources/webapp/`
 
 ---
 

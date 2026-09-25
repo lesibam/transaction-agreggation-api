@@ -98,6 +98,7 @@ The Meta-Agent's row is not phase-bound: it runs after every phase reaches "Done
 - [x] **Cursor Pagination**: Implement stable keyset pagination (`transaction_date DESC, id DESC`).
 - [x] **Freshness Metadata**: Implement logic to calculate `current_time - last_successful_sync` and include it in API responses (thresholds configurable; 5/30-minute defaults).
 - [x] **Aggregation Logic**: Build summaries (SQL `SUM` per currency, category breakdown) ensuring no silent currency conversion.
+- [x] **Web Dashboard & API Docs Viewer** *(owner: UI/UX Engineer)*: A read-only browser dashboard (`/ui`) over the existing `/v1/**` contract (transactions with filters/pagination, per-currency summaries, category breakdown, ADMIN-only source sync status) and a `swagger-ui` viewer (`/docs`) over the existing hand-maintained `openapi.yaml` — no `springdoc` annotation scanning, no second spec (ADR-014). Both static assets, no build step, no new server-side authority, independently toggleable off for production (`app.ui.enabled`/`app.docs.enabled`, default `true`) via `UiResourceConfig`/`DocsResourceConfig` — disabled means the path 404s (no handler registered), not a hidden link. See ADR-013/014 and README "Web Dashboard & API Docs". Verified: `DocsAndUiAvailabilityTest`/`DocsAndUiDisabledTest` (both toggle states, real Testcontainers run), plus a live end-to-end check against a running stack with screenshots at each of the dashboard's three tabs and the docs viewer.
 
 ### Phase 5: Security & Tenancy
 *Goal: Hardening the system for multi-tenant production use.*
